@@ -39,7 +39,7 @@ Highest ROI, lowest risk. Both items address immediate user pain.
 
 ---
 
-## Phase 2 — Per-task rotation + activity feed  ⏳
+## Phase 2 — Per-task rotation + activity feed  ✅ shipped
 
 The user's core multi-user ask. Needs schema work; no external services.
 
@@ -71,7 +71,13 @@ The user's core multi-user ask. Needs schema work; no external services.
 
 ---
 
-## Phase 3 — Push notifications via FCM  ⏳
+## Phase 2b — Task & area edit/delete (CRUD gap)  ✅ shipped
+
+Long-press task row → Edit / Delete. Long-press area header → Rename / Delete (with cascade warning). Backend PATCH /api/areas/:id added. All existing PATCH/DELETE task endpoints wired to UI.
+
+---
+
+## Phase 3 — Push notifications via FCM  ✅ shipped
 
 Largest infra lift. **Requires one-time external setup before code lands.**
 
