@@ -274,8 +274,9 @@ app.get("/api/tasks", async (c) => {
       ORDER BY t.created_at`,
   )
     .bind(hh)
-    .all();
-  return c.json(results);
+    .all<{ autoRotate: number } & Record<string, unknown>>();
+  // SQLite stores booleans as INTEGER; coerce to proper JSON boolean for the client.
+  return c.json(results.map((r) => ({ ...r, autoRotate: r.autoRotate !== 0 })));
 });
 
 app.post("/api/tasks", async (c) => {

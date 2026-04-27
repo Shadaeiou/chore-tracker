@@ -541,7 +541,7 @@ describe("PATCH /api/tasks/:id", () => {
       id: string; autoRotate: boolean; effortPoints: number;
     }>;
     const t = tasks.find((t) => t.id === taskId)!;
-    expect(t.autoRotate).toBe(1); // stored as integer in D1
+    expect(t.autoRotate).toBe(true); // must be JSON boolean, not the raw SQLite integer
     expect(t.effortPoints).toBe(3);
   });
 
@@ -599,10 +599,11 @@ describe("rotation", () => {
     await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
 
     const tasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<{
-      id: string; assignedTo: string;
+      id: string; assignedTo: string; autoRotate: boolean;
     }>;
     const updated = tasks.find((t) => t.id === task.id)!;
     expect(updated.assignedTo).toBe(bob.userId);
+    expect(updated.autoRotate).toBe(true); // contract: must be JSON boolean not integer
   });
 
   it("non-rotating task keeps assignee after completion", async () => {
