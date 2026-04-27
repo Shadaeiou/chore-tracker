@@ -54,7 +54,7 @@ private fun Root(app: ChoreApp) {
             )
         }
         composable("settings") {
-            SettingsScreen(session = app.session, onBack = { nav.popBackStack() })
+            SettingsScreen(session = app.session, onBack = { nav.popBackStack() }, repo = app.repo)
         }
     }
 }
