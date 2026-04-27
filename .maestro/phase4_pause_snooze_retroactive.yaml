@@ -1,0 +1,67 @@
+# Phase 4 acceptance: vacation mode, snooze, retroactive completion.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase4+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase4Tester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase4 home"
+- tapOn: { id: "submitButton" }
+- assertVisible: "Tap + to add your first area"
+
+# Setup: area + task
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- tapOn: { id: "addTaskButton:Kitchen" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counter"
+- tapOn: { id: "addTaskConfirm" }
+- assertVisible: "Wipe counter"
+- takeScreenshot: phase4_01_setup
+
+# Vacation mode: tap beach icon → banner appears
+- tapOn: { id: "vacationButton" }
+- extendedWaitUntil:
+    visible: { id: "vacationBanner" }
+    timeout: 5000
+- assertVisible: "Vacation mode"
+- takeScreenshot: phase4_02_vacation_active
+
+# Resume from banner
+- tapOn: { id: "resumeButton" }
+- extendedWaitUntil:
+    notVisible: { id: "vacationBanner" }
+    timeout: 5000
+- takeScreenshot: phase4_03_vacation_cleared
+
+# Snooze 3 days
+- longPressOn: { id: "taskRow:Wipe counter" }
+- assertVisible: { id: "taskMenuSnooze:Wipe counter" }
+- tapOn: { id: "taskMenuSnooze:Wipe counter" }
+- assertVisible: { id: "snoozeDialog:Wipe counter" }
+- tapOn: { id: "snoozeOption:3" }
+- extendedWaitUntil:
+    visible: "snoozed"
+    timeout: 5000
+- takeScreenshot: phase4_04_snoozed
+
+# Retroactive completion
+- longPressOn: { id: "taskRow:Wipe counter" }
+- assertVisible: { id: "taskMenuMarkDoneAt:Wipe counter" }
+- tapOn: { id: "taskMenuMarkDoneAt:Wipe counter" }
+- assertVisible: { id: "retroactiveDialog:Wipe counter" }
+- takeScreenshot: phase4_05_datepicker
+- tapOn: { id: "retroactiveConfirm" }
+- extendedWaitUntil:
+    visible: "last done by"
+    timeout: 5000
+- takeScreenshot: phase4_06_retroactive_completed

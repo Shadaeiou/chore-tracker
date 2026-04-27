@@ -17,6 +17,7 @@ data class HouseholdState(
     val members: List<Member> = emptyList(),
     val activity: List<ActivityEntry> = emptyList(),
     val workload: List<WorkloadEntry> = emptyList(),
+    val pausedUntil: Long? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -87,6 +88,7 @@ class Repo(
                 members = household.members,
                 activity = activity,
                 workload = workload,
+                pausedUntil = household.household.pausedUntil,
                 isLoading = false,
                 error = null,
             )

@@ -24,9 +24,13 @@ class FakeApi : ChoreApi {
 
     override suspend fun register(req: RegisterRequest): AuthResponse { maybeThrow(); return nextAuth }
     override suspend fun login(req: LoginRequest): AuthResponse { maybeThrow(); return nextAuth }
+    var pausedUntil: Long? = null
     override suspend fun household(): HouseholdResponse {
         maybeThrow()
-        return HouseholdResponse(Household("hh-1", "Home", 0), members.toList())
+        return HouseholdResponse(Household("hh-1", "Home", 0, pausedUntil), members.toList())
+    }
+    override suspend fun patchHousehold(req: PatchHouseholdRequest) {
+        maybeThrow(); pausedUntil = req.pausedUntil
     }
     override suspend fun createInvite(): Invite { maybeThrow(); return Invite(inviteCode, expiresAt = 0) }
     override suspend fun areas(): List<Area> { maybeThrow(); refreshes += 1; return areas.toList() }
@@ -68,10 +72,19 @@ class FakeApi : ChoreApi {
             )
         }
     }
-    override suspend fun completeTask(id: String) {
+    override suspend fun completeTask(id: String, req: CompleteRequest) {
         maybeThrow()
         completed.add(id)
-        tasks.replaceAll { if (it.id == id) it.copy(lastDoneAt = System.currentTimeMillis(), lastDoneBy = "Tester") else it }
+        val ts = req.at ?: System.currentTimeMillis()
+        tasks.replaceAll {
+            if (it.id == id) it.copy(lastDoneAt = ts, lastDoneBy = "Tester", snoozedUntil = null) else it
+        }
+    }
+    val snoozed = mutableListOf<Pair<String, Long>>()
+    override suspend fun snoozeTask(id: String, req: SnoozeRequest) {
+        maybeThrow()
+        snoozed.add(id to req.until)
+        tasks.replaceAll { if (it.id == id) it.copy(snoozedUntil = req.until) else it }
     }
     val undone = mutableListOf<String>()
     override suspend fun undoLastCompletion(id: String) {

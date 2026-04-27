@@ -840,3 +840,199 @@ describe("device tokens", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("PATCH /api/household (vacation/pause)", () => {
+  it("sets and clears paused_until", async () => {
+    const auth = await register();
+    const future = Date.now() + 86_400_000;
+    const set = await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ pausedUntil: future }),
+    });
+    expect(set.status).toBe(200);
+
+    const hh = (await (await api("/api/household", { token: auth.token })).json()) as {
+      household: { pausedUntil: number | null };
+    };
+    expect(hh.household.pausedUntil).toBe(future);
+
+    const clear = await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ pausedUntil: null }),
+    });
+    expect(clear.status).toBe(200);
+
+    const after = (await (await api("/api/household", { token: auth.token })).json()) as {
+      household: { pausedUntil: number | null };
+    };
+    expect(after.household.pausedUntil).toBeNull();
+  });
+
+  it("dueness clamps to 0 when paused", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 1 }),
+    });
+
+    // Before pause: dueness > 0 (never done, freq=1 day)
+    const before = (await (await api("/api/tasks", { token: auth.token })).json()) as Array<{ dueness: number }>;
+    expect(before[0].dueness).toBeGreaterThan(0);
+
+    // Pause
+    await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ pausedUntil: Date.now() + 86_400_000 }),
+    });
+
+    const after = (await (await api("/api/tasks", { token: auth.token })).json()) as Array<{ dueness: number }>;
+    expect(after[0].dueness).toBe(0);
+  });
+
+  it("rejects empty body", async () => {
+    const auth = await register();
+    const res = await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/tasks/:id/snooze", () => {
+  async function seedTask(): Promise<{ token: string; taskId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Room" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Clean", frequencyDays: 1 }),
+    })).json()) as { id: string };
+    return { token: auth.token, taskId: task.id };
+  }
+
+  it("snoozes a task; dueness becomes 0 until snooze expires", async () => {
+    const { token, taskId } = await seedTask();
+    const future = Date.now() + 3 * 86_400_000;
+    const res = await api(`/api/tasks/${taskId}/snooze`, {
+      method: "POST", token,
+      body: JSON.stringify({ until: future }),
+    });
+    expect(res.status).toBe(200);
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; snoozedUntil: number | null; dueness: number;
+    }>;
+    const t = tasks.find((t) => t.id === taskId)!;
+    expect(t.snoozedUntil).toBe(future);
+    expect(t.dueness).toBe(0);
+  });
+
+  it("rejects past or zero until", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}/snooze`, {
+      method: "POST", token,
+      body: JSON.stringify({ until: Date.now() - 1000 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects cross-household snooze", async () => {
+    const { taskId } = await seedTask();
+    const bob = await register();
+    const res = await api(`/api/tasks/${taskId}/snooze`, {
+      method: "POST", token: bob.token,
+      body: JSON.stringify({ until: Date.now() + 86_400_000 }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("completion clears the snooze", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}/snooze`, {
+      method: "POST", token,
+      body: JSON.stringify({ until: Date.now() + 86_400_000 }),
+    });
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; snoozedUntil: number | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.snoozedUntil).toBeNull();
+  });
+});
+
+describe("retroactive completion (POST /api/tasks/:id/complete with at)", () => {
+  async function seedTask(): Promise<{ token: string; taskId: string; createdAt: number }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 7 }),
+    })).json()) as { id: string; createdAt: number };
+    return { token: auth.token, taskId: task.id, createdAt: task.createdAt };
+  }
+
+  it("accepts a past timestamp", async () => {
+    const { token, taskId, createdAt } = await seedTask();
+    // Wait briefly so we have wiggle room between createdAt and now.
+    await new Promise((r) => setTimeout(r, 20));
+    const at = createdAt + 5; // 5ms after creation, still in the past
+    const res = await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ at }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { doneAt: number };
+    expect(data.doneAt).toBe(at);
+  });
+
+  it("rejects future timestamps", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ at: Date.now() + 86_400_000 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects timestamps before task creation", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ at: 1000 }), // year 1970
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("doesn't overwrite a newer last_done_at with an older retroactive completion", async () => {
+    const { token, taskId } = await seedTask();
+    // Mark done now
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    const afterFirst = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; lastDoneAt: number | null;
+    }>;
+    const firstDoneAt = afterFirst.find((t) => t.id === taskId)!.lastDoneAt!;
+
+    // Mark done yesterday (retroactive)
+    await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ at: Date.now() - 86_400_000 }),
+    });
+
+    const afterSecond = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; lastDoneAt: number | null;
+    }>;
+    // Should still be the first (newer) timestamp
+    expect(afterSecond.find((t) => t.id === taskId)?.lastDoneAt).toBe(firstDoneAt);
+  });
+});

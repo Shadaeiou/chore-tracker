@@ -23,12 +23,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +46,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -76,13 +82,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.chore.tracker.data.Area
+import com.chore.tracker.data.CompleteRequest
 import com.chore.tracker.data.CreateAreaRequest
 import com.chore.tracker.data.CreateTaskRequest
 import com.chore.tracker.data.DeviceTokenRequest
 import com.chore.tracker.data.Member
 import com.chore.tracker.data.PatchAreaRequest
+import com.chore.tracker.data.PatchHouseholdRequest
 import com.chore.tracker.data.PatchTaskRequest
 import com.chore.tracker.data.Repo
+import com.chore.tracker.data.SnoozeRequest
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.dirtiness
 import com.google.firebase.ktx.Firebase
@@ -107,6 +116,8 @@ fun HomeScreen(
     var deletingArea by remember { mutableStateOf<Area?>(null) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
+    var snoozingTask by remember { mutableStateOf<Task?>(null) }
+    var retroactiveTask by remember { mutableStateOf<Task?>(null) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
@@ -158,6 +169,23 @@ fun HomeScreen(
                         },
                     ) { Icon(Icons.Default.PersonAdd, contentDescription = "Invite") }
                     IconButton(
+                        modifier = Modifier.testTag("vacationButton"),
+                        onClick = {
+                            scope.launch {
+                                val isPaused = state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()
+                                val newPause = if (isPaused) null else System.currentTimeMillis() + 365L * 86_400_000L
+                                runCatching { repo.api.patchHousehold(PatchHouseholdRequest(newPause)) }
+                                    .onSuccess { repo.refresh() }
+                                    .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
+                            }
+                        },
+                    ) {
+                        val tint = if (state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis())
+                            MaterialTheme.colorScheme.primary
+                        else androidx.compose.ui.graphics.Color.Unspecified
+                        Icon(Icons.Default.BeachAccess, contentDescription = "Vacation mode", tint = tint)
+                    }
+                    IconButton(
                         modifier = Modifier.testTag("settingsButton"),
                         onClick = onOpenSettings,
                     ) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
@@ -208,6 +236,39 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
+                        if (state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("vacationBanner"),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Default.BeachAccess,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                    Text(
+                                        "Vacation mode — indicators paused",
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    )
+                                    TextButton(
+                                        modifier = Modifier.testTag("resumeButton"),
+                                        onClick = {
+                                            scope.launch {
+                                                runCatching { repo.api.patchHousehold(PatchHouseholdRequest(null)) }
+                                                    .onSuccess { repo.refresh() }
+                                                    .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
+                                            }
+                                        },
+                                    ) { Text("Resume") }
+                                }
+                            }
+                        }
                         if (state.workload.isNotEmpty()) {
                             WorkloadCard(
                                 entries = state.workload,
@@ -229,6 +290,8 @@ fun HomeScreen(
                                         onDeleteArea = { deletingArea = area },
                                         onEditTask = { task -> editingTask = task },
                                         onDeleteTask = { task -> deletingTask = task },
+                                        onSnoozeTask = { task -> snoozingTask = task },
+                                        onMarkDoneAt = { task -> retroactiveTask = task },
                                         onComplete = { task ->
                                             scope.launch {
                                                 runCatching { repo.api.completeTask(task.id) }
@@ -405,6 +468,51 @@ fun HomeScreen(
         )
     }
 
+    // ── Snooze task ───────────────────────────────────────────────────────────
+    snoozingTask?.let { task ->
+        AlertDialog(
+            modifier = Modifier.testTag("snoozeDialog:${task.name}"),
+            onDismissRequest = { snoozingTask = null },
+            title = { Text("Snooze \"${task.name}\"") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(1L to "1 day", 3L to "3 days", 7L to "1 week").forEach { (days, label) ->
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth().testTag("snoozeOption:$days"),
+                            onClick = {
+                                snoozingTask = null
+                                scope.launch {
+                                    val until = System.currentTimeMillis() + days * 86_400_000L
+                                    runCatching { repo.api.snoozeTask(task.id, SnoozeRequest(until)) }
+                                        .onSuccess { repo.refresh() }
+                                        .onFailure { snackbarHost.showSnackbar("Snooze failed: ${it.message}") }
+                                }
+                            },
+                        ) { Text(label) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { snoozingTask = null }) { Text("Cancel") } },
+        )
+    }
+
+    // ── Mark done at... (retroactive completion) ──────────────────────────────
+    retroactiveTask?.let { task ->
+        RetroactiveDoneDialog(
+            task = task,
+            onDismiss = { retroactiveTask = null },
+            onConfirm = { ts ->
+                retroactiveTask = null
+                scope.launch {
+                    runCatching { repo.api.completeTask(task.id, CompleteRequest(at = ts)) }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
+                }
+            },
+        )
+    }
+
     // ── Invite code ───────────────────────────────────────────────────────────
     inviteCode?.let { code ->
         AlertDialog(
@@ -433,6 +541,8 @@ private fun AreaCard(
     onDeleteArea: () -> Unit,
     onEditTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onSnoozeTask: (Task) -> Unit,
+    onMarkDoneAt: (Task) -> Unit,
     onComplete: (Task) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -486,6 +596,8 @@ private fun AreaCard(
                         onComplete = { onComplete(task) },
                         onEdit = { onEditTask(task) },
                         onDelete = { onDeleteTask(task) },
+                        onSnooze = { onSnoozeTask(task) },
+                        onMarkDoneAt = { onMarkDoneAt(task) },
                     )
                 }
             }
@@ -500,6 +612,8 @@ private fun TaskRow(
     onComplete: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onSnooze: () -> Unit,
+    onMarkDoneAt: () -> Unit,
 ) {
     val ratio = task.dirtiness().toFloat()
     val color = when {
@@ -548,10 +662,20 @@ private fun TaskRow(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 val attribution = task.lastDoneBy?.let { "last done by $it" } ?: "never done"
-                Text(
-                    "every ${task.frequencyDays}d · ${(ratio * 100).toInt()}% · $attribution",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                val snoozed = task.snoozedUntil != null && task.snoozedUntil > System.currentTimeMillis()
+                if (snoozed) {
+                    val days = ((task.snoozedUntil!! - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0)
+                    Text(
+                        "snoozed · $days day${if (days == 1L) "" else "s"} left",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                } else {
+                    Text(
+                        "every ${task.frequencyDays}d · ${(ratio * 100).toInt()}% · $attribution",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             IconButton(
                 modifier = Modifier.testTag("completeButton:${task.name}"),
@@ -575,6 +699,16 @@ private fun TaskRow(
                 text = { Text("Edit") },
                 onClick = { menuExpanded = false; onEdit() },
                 modifier = Modifier.testTag("taskMenuEdit:${task.name}"),
+            )
+            DropdownMenuItem(
+                text = { Text("Snooze…") },
+                onClick = { menuExpanded = false; onSnooze() },
+                modifier = Modifier.testTag("taskMenuSnooze:${task.name}"),
+            )
+            DropdownMenuItem(
+                text = { Text("Mark done at…") },
+                onClick = { menuExpanded = false; onMarkDoneAt() },
+                modifier = Modifier.testTag("taskMenuMarkDoneAt:${task.name}"),
             )
             DropdownMenuItem(
                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
@@ -616,6 +750,37 @@ private fun TextDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RetroactiveDoneDialog(
+    task: Task,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val createdAt = task.createdAt
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = now,
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                utcTimeMillis in createdAt..now
+        },
+    )
+    DatePickerDialog(
+        modifier = Modifier.testTag("retroactiveDialog:${task.name}"),
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                modifier = Modifier.testTag("retroactiveConfirm"),
+                onClick = { pickerState.selectedDateMillis?.let(onConfirm) },
+            ) { Text("Mark done") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        DatePicker(state = pickerState)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -168,7 +168,7 @@ app.use("/api/*", async (c, next) => {
 app.get("/api/household", async (c) => {
   const { hh } = c.get("user");
   const household = await c.env.DB.prepare(
-    "SELECT id, name, created_at AS createdAt FROM households WHERE id = ?",
+    "SELECT id, name, created_at AS createdAt, paused_until AS pausedUntil FROM households WHERE id = ?",
   )
     .bind(hh)
     .first();
@@ -179,6 +179,17 @@ app.get("/api/household", async (c) => {
     .bind(hh)
     .all();
   return c.json({ household, members });
+});
+
+app.patch("/api/household", async (c) => {
+  const { hh } = c.get("user");
+  const body = await c.req.json<{ pausedUntil?: number | null }>();
+  if (!("pausedUntil" in body))
+    throw new HTTPException(400, { message: "nothing to update" });
+  await c.env.DB.prepare("UPDATE households SET paused_until = ? WHERE id = ?")
+    .bind(body.pausedUntil ?? null, hh)
+    .run();
+  return c.json({ ok: true });
 });
 
 // ---------- Invites ----------
@@ -275,6 +286,12 @@ app.delete("/api/areas/:id", async (c) => {
 
 app.get("/api/tasks", async (c) => {
   const { hh } = c.get("user");
+  const household = await c.env.DB.prepare(
+    "SELECT paused_until FROM households WHERE id = ?",
+  ).bind(hh).first<{ paused_until: number | null }>();
+  const now = Date.now();
+  const isPaused = household?.paused_until != null && household.paused_until > now;
+
   const { results } = await c.env.DB.prepare(
     `SELECT t.id, t.area_id AS areaId, t.name,
             t.frequency_days AS frequencyDays,
@@ -283,6 +300,7 @@ app.get("/api/tasks", async (c) => {
             t.assigned_to    AS assignedTo,
             t.auto_rotate    AS autoRotate,
             t.effort_points  AS effortPoints,
+            t.snoozed_until  AS snoozedUntil,
             u.display_name   AS lastDoneBy,
             ua.display_name  AS assignedToName
        FROM tasks t
@@ -298,9 +316,30 @@ app.get("/api/tasks", async (c) => {
       ORDER BY t.created_at`,
   )
     .bind(hh)
-    .all<{ autoRotate: number } & Record<string, unknown>>();
-  // SQLite stores booleans as INTEGER; coerce to proper JSON boolean for the client.
-  return c.json(results.map((r) => ({ ...r, autoRotate: r.autoRotate !== 0 })));
+    .all<{
+      autoRotate: number;
+      snoozedUntil: number | null;
+      lastDoneAt: number | null;
+      frequencyDays: number;
+    } & Record<string, unknown>>();
+
+  return c.json(results.map((r) => {
+    const isSnoozed = r.snoozedUntil != null && r.snoozedUntil > now;
+    let dueness: number;
+    if (isPaused || isSnoozed) {
+      dueness = 0;
+    } else if (r.lastDoneAt == null) {
+      dueness = 1.0;
+    } else {
+      const window = r.frequencyDays * 86_400_000;
+      dueness = window > 0 ? (now - r.lastDoneAt) / window : 1.0;
+    }
+    return {
+      ...r,
+      autoRotate: r.autoRotate !== 0,
+      dueness,
+    };
+  }));
 });
 
 app.post("/api/tasks", async (c) => {
@@ -352,23 +391,36 @@ app.post("/api/tasks", async (c) => {
 app.post("/api/tasks/:id/complete", async (c) => {
   const { sub, hh } = c.get("user");
   const taskId = c.req.param("id");
+  // Optional retroactive timestamp; body may be empty for "right now" completion.
+  const body = await c.req.json<{ at?: number }>().catch(() => ({} as { at?: number }));
 
   const task = await c.env.DB.prepare(
-    `SELECT t.id, t.name, t.auto_rotate, t.assigned_to FROM tasks t
+    `SELECT t.id, t.name, t.auto_rotate, t.assigned_to, t.created_at FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
   )
     .bind(taskId, hh)
-    .first<{ id: string; name: string; auto_rotate: number; assigned_to: string | null }>();
+    .first<{ id: string; name: string; auto_rotate: number; assigned_to: string | null; created_at: number }>();
   if (!task) throw new HTTPException(404);
 
-  const now = Date.now();
+  const realNow = Date.now();
+  let completedAt = realNow;
+  if (body.at !== undefined && body.at !== null) {
+    if (body.at > realNow) throw new HTTPException(400, { message: "completion time cannot be in the future" });
+    if (body.at < task.created_at) throw new HTTPException(400, { message: "completion time predates task creation" });
+    completedAt = body.at;
+  }
   const completionId = newId();
   const stmts: D1PreparedStatement[] = [
     c.env.DB.prepare(
       "INSERT INTO completions (id, task_id, user_id, done_at) VALUES (?, ?, ?, ?)",
-    ).bind(completionId, taskId, sub, now),
-    c.env.DB.prepare("UPDATE tasks SET last_done_at = ? WHERE id = ?").bind(now, taskId),
+    ).bind(completionId, taskId, sub, completedAt),
+    // last_done_at uses MAX so an older retroactive completion doesn't overwrite a newer one.
+    c.env.DB.prepare(
+      `UPDATE tasks SET last_done_at = (
+         SELECT MAX(done_at) FROM completions WHERE task_id = ?
+       ), snoozed_until = NULL WHERE id = ?`,
+    ).bind(taskId, taskId),
   ];
 
   if (task.auto_rotate) {
@@ -409,7 +461,26 @@ app.post("/api/tasks/:id/complete", async (c) => {
     }
   }
 
-  return c.json({ ok: true, doneAt: now });
+  return c.json({ ok: true, doneAt: completedAt });
+});
+
+app.post("/api/tasks/:id/snooze", async (c) => {
+  const { hh } = c.get("user");
+  const taskId = c.req.param("id");
+  const body = await c.req.json<{ until: number }>();
+  if (!body.until || body.until <= Date.now())
+    throw new HTTPException(400, { message: "until must be a future timestamp" });
+
+  const task = await c.env.DB.prepare(
+    `SELECT t.id FROM tasks t
+       JOIN areas a ON a.id = t.area_id
+      WHERE t.id = ? AND a.household_id = ?`,
+  ).bind(taskId, hh).first();
+  if (!task) throw new HTTPException(404);
+
+  await c.env.DB.prepare("UPDATE tasks SET snoozed_until = ? WHERE id = ?")
+    .bind(body.until, taskId).run();
+  return c.json({ ok: true });
 });
 
 app.patch("/api/tasks/:id", async (c) => {

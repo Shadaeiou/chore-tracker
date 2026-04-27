@@ -26,6 +26,9 @@ interface ChoreApi {
     @GET("api/household")
     suspend fun household(): HouseholdResponse
 
+    @PATCH("api/household")
+    suspend fun patchHousehold(@Body req: PatchHouseholdRequest)
+
     @POST("api/invites")
     suspend fun createInvite(): Invite
 
@@ -51,7 +54,10 @@ interface ChoreApi {
     suspend fun patchTask(@Path("id") id: String, @Body req: PatchTaskRequest)
 
     @POST("api/tasks/{id}/complete")
-    suspend fun completeTask(@Path("id") id: String)
+    suspend fun completeTask(@Path("id") id: String, @Body req: CompleteRequest = CompleteRequest())
+
+    @POST("api/tasks/{id}/snooze")
+    suspend fun snoozeTask(@Path("id") id: String, @Body req: SnoozeRequest)
 
     @DELETE("api/tasks/{id}/completions/last")
     suspend fun undoLastCompletion(@Path("id") id: String)

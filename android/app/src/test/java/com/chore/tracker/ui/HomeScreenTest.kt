@@ -19,6 +19,7 @@ import com.chore.tracker.data.Member
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.WorkloadEntry
+import com.chore.tracker.data.dirtiness
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -287,6 +288,106 @@ class HomeScreenTest {
         compose.onNodeWithTag("deleteAreaConfirm").performClick()
         compose.waitUntil(2_000) { fake.areas.isEmpty() }
         assertThat(fake.areas).isEmpty()
+    }
+
+    @Test fun `vacation banner shows when household is paused`() {
+        val fake = FakeApi().apply {
+            pausedUntil = System.currentTimeMillis() + 86_400_000L
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("vacationBanner").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("vacationBanner").assertIsDisplayed()
+        compose.onNodeWithTag("resumeButton").assertIsDisplayed()
+    }
+
+    @Test fun `tapping resume clears the pause`() {
+        val fake = FakeApi().apply {
+            pausedUntil = System.currentTimeMillis() + 86_400_000L
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("resumeButton").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("resumeButton").performClick()
+        compose.waitUntil(2_000) { fake.pausedUntil == null }
+        assertThat(fake.pausedUntil).isNull()
+    }
+
+    @Test fun `long press task shows snooze and mark done at options`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskMenuSnooze:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskMenuSnooze:Mop floor").assertIsDisplayed()
+        compose.onNodeWithTag("taskMenuMarkDoneAt:Mop floor").assertIsDisplayed()
+    }
+
+    @Test fun `snooze 3 days calls fake api with correct future timestamp`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskMenuSnooze:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskMenuSnooze:Mop floor").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("snoozeOption:3").fetchSemanticsNodes().isNotEmpty()
+        }
+        val before = System.currentTimeMillis()
+        compose.onNodeWithTag("snoozeOption:3").performClick()
+        compose.waitUntil(2_000) { fake.snoozed.isNotEmpty() }
+        assertThat(fake.snoozed).hasSize(1)
+        val (taskId, until) = fake.snoozed.first()
+        assertThat(taskId).isEqualTo("t1")
+        // Snooze should be ~3 days from now (with a generous fudge factor)
+        val expected = before + 3 * 86_400_000L
+        assertThat(until).isAtLeast(expected - 5_000)
+        assertThat(until).isAtMost(expected + 5_000)
+    }
+
+    @Test fun `dirtiness uses server-computed dueness when present`() {
+        // Server returns dueness = 0 (paused/snoozed); local computation would say > 0.
+        val task = Task(
+            id = "t1", areaId = "a1", name = "x",
+            frequencyDays = 1, lastDoneAt = null, lastDoneBy = null, createdAt = 0,
+            dueness = 0.0,
+        )
+        assertThat(task.dirtiness(now = 1_000_000_000L)).isEqualTo(0.0)
+    }
+
+    @Test fun `dirtiness falls back to local calc when server dueness absent`() {
+        val task = Task(
+            id = "t1", areaId = "a1", name = "x",
+            frequencyDays = 7, lastDoneAt = null, lastDoneBy = null, createdAt = 0,
+            dueness = null,
+        )
+        assertThat(task.dirtiness()).isEqualTo(1.0)
     }
 
     @Test fun `add task dialog shows effort slider and assignee picker when members present`() {

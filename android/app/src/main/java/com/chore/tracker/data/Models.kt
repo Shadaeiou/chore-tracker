@@ -46,6 +46,8 @@ data class Task(
     val assignedToName: String? = null,
     val autoRotate: Boolean = false,
     val effortPoints: Int = 1,
+    val snoozedUntil: Long? = null,
+    val dueness: Double? = null,
 )
 
 @Serializable
@@ -94,7 +96,21 @@ data class WorkloadEntry(
 data class Invite(val code: String, val expiresAt: Long)
 
 @Serializable
-data class Household(val id: String, val name: String, val createdAt: Long)
+data class Household(
+    val id: String,
+    val name: String,
+    val createdAt: Long,
+    val pausedUntil: Long? = null,
+)
+
+@Serializable
+data class PatchHouseholdRequest(val pausedUntil: Long? = null)
+
+@Serializable
+data class SnoozeRequest(val until: Long)
+
+@Serializable
+data class CompleteRequest(val at: Long? = null)
 
 @Serializable
 data class Member(val id: String, val displayName: String, val email: String)
@@ -102,8 +118,10 @@ data class Member(val id: String, val displayName: String, val email: String)
 @Serializable
 data class HouseholdResponse(val household: Household, val members: List<Member>)
 
-/** Computed dirtiness 0.0 (just done) → 1.0 (due) → >1.0 (overdue). */
+/** Computed dirtiness 0.0 (just done) → 1.0 (due) → >1.0 (overdue).
+ * Server-computed `dueness` wins when present (it accounts for pause/snooze). */
 fun Task.dirtiness(now: Long = System.currentTimeMillis()): Double {
+    dueness?.let { return it }
     val last = lastDoneAt ?: return 1.0
     val window = frequencyDays.toLong() * 86_400_000L
     if (window <= 0) return 1.0

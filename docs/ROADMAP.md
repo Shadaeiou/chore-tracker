@@ -120,7 +120,7 @@ Largest infra lift. **Requires one-time external setup before code lands.**
 
 ---
 
-## Phase 4 — Lifecycle (pause, snooze, retroactive)  ⏳
+## Phase 4 — Lifecycle (pause, snooze, retroactive)  ✅ shipped
 
 Tody's "Pause is the #1 abandonment cause" insight. Plus retroactive completion + per-task snooze.
 
