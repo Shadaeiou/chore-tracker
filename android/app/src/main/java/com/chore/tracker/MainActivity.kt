@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -14,14 +13,18 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.chore.tracker.ui.AuthScreen
+import com.chore.tracker.ui.ChoreTheme
 import com.chore.tracker.ui.HomeScreen
+import com.chore.tracker.ui.SettingsScreen
+import com.chore.tracker.ui.ThemeMode
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as ChoreApp
         setContent {
-            MaterialTheme {
+            val themeMode by app.session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
+            ChoreTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Root(app)
                 }
@@ -42,9 +45,16 @@ private fun Root(app: ChoreApp) {
             })
         }
         composable("home") {
-            HomeScreen(repo = app.repo, onSignOut = {
-                nav.navigate("auth") { popUpTo("home") { inclusive = true } }
-            })
+            HomeScreen(
+                repo = app.repo,
+                onSignOut = {
+                    nav.navigate("auth") { popUpTo("home") { inclusive = true } }
+                },
+                onOpenSettings = { nav.navigate("settings") },
+            )
+        }
+        composable("settings") {
+            SettingsScreen(session = app.session, onBack = { nav.popBackStack() })
         }
     }
 }

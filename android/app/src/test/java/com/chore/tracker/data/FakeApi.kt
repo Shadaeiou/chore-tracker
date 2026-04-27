@@ -49,5 +49,11 @@ class FakeApi : ChoreApi {
         completed.add(id)
         tasks.replaceAll { if (it.id == id) it.copy(lastDoneAt = System.currentTimeMillis(), lastDoneBy = "Tester") else it }
     }
+    val undone = mutableListOf<String>()
+    override suspend fun undoLastCompletion(id: String) {
+        maybeThrow()
+        undone.add(id)
+        tasks.replaceAll { if (it.id == id) it.copy(lastDoneAt = null, lastDoneBy = null) else it }
+    }
     override suspend fun deleteTask(id: String) { maybeThrow(); tasks.removeAll { it.id == id } }
 }

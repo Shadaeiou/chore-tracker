@@ -1,0 +1,70 @@
+# Phase 1 acceptance flow: complete-undo round-trip + dark theme toggle.
+# Requires the app pointed at a live backend (CI passes -PapiBaseUrl).
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase1+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase1Tester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase1 home"
+- tapOn: { id: "submitButton" }
+- assertVisible: "Tap + to add your first area"
+- takeScreenshot: phase1_01_signed_in_empty
+
+# Add area + task
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- assertVisible: "Kitchen"
+- tapOn: { id: "addTaskButton:Kitchen" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counter"
+- tapOn: { id: "addTaskConfirm" }
+- assertVisible: "Wipe counter"
+- assertVisible: "never done"
+- takeScreenshot: phase1_02_task_created
+
+# Complete the task → undo snackbar appears
+- tapOn: { id: "completeButton:Wipe counter" }
+- assertVisible: "Marked done"
+- assertVisible: "Undo"
+- assertVisible: "last done by Phase1Tester"
+- takeScreenshot: phase1_03_undo_snackbar
+
+# Tap Undo → task returns to never-done
+- tapOn: "Undo"
+- extendedWaitUntil:
+    visible: "never done"
+    timeout: 5000
+- assertNotVisible: "last done by Phase1Tester"
+- takeScreenshot: phase1_04_after_undo
+
+# Open Settings → switch to Dark mode
+- tapOn: { id: "settingsButton" }
+- assertVisible: "Theme"
+- assertVisible: "Match system"
+- assertVisible: "Light"
+- assertVisible: "Dark"
+- takeScreenshot: phase1_05_settings_default
+- tapOn: { id: "themeOption:DARK" }
+- takeScreenshot: phase1_06_settings_dark_selected
+
+# Back to home in dark mode
+- tapOn: { id: "settingsBack" }
+- assertVisible: "Wipe counter"
+- takeScreenshot: phase1_07_home_dark_mode
+
+# Switch back to Light, return home
+- tapOn: { id: "settingsButton" }
+- tapOn: { id: "themeOption:LIGHT" }
+- takeScreenshot: phase1_08_settings_light_selected
+- tapOn: { id: "settingsBack" }
+- takeScreenshot: phase1_09_home_light_mode

@@ -3,6 +3,7 @@ package com.chore.tracker.ui
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -100,5 +101,56 @@ class HomeScreenTest {
         }
         compose.onNodeWithTag("inviteCodeText").assertIsDisplayed()
         compose.onNodeWithText("JOIN-ABCDEF").assertIsDisplayed()
+    }
+
+    @Test fun `completing a task surfaces the undo snackbar`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("completeButton:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("completeButton:Mop floor").performClick()
+
+        compose.waitUntil(2_000) { fake.completed.isNotEmpty() }
+        compose.waitUntil(3_000) {
+            compose.onAllNodesWithText("Marked done").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Marked done").assertIsDisplayed()
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+    }
+
+    @Test fun `tapping undo on the snackbar calls the undo api`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("completeButton:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("completeButton:Mop floor").performClick()
+        compose.waitUntil(3_000) {
+            compose.onAllNodesWithText("Undo").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitUntil(2_000) { fake.undone.isNotEmpty() }
+        assertThat(fake.undone).containsExactly("t1")
+    }
+
+    @Test fun `tapping the settings icon invokes the open-settings callback`() {
+        val repo = newRepo(FakeApi())
+        var opened = false
+        compose.setContent {
+            HomeScreen(repo = repo, onSignOut = {}, onOpenSettings = { opened = true })
+        }
+        compose.onNodeWithTag("settingsButton").performClick()
+        assertThat(opened).isTrue()
     }
 }

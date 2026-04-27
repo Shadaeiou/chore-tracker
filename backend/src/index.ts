@@ -335,6 +335,44 @@ app.post("/api/tasks/:id/complete", async (c) => {
   return c.json({ ok: true, doneAt: now });
 });
 
+// Undo: delete the most-recent completion for this task and recompute
+// last_done_at from whatever's left (or NULL if there are no completions).
+app.delete("/api/tasks/:id/completions/last", async (c) => {
+  const { hh } = c.get("user");
+  const taskId = c.req.param("id");
+
+  const task = await c.env.DB.prepare(
+    `SELECT t.id FROM tasks t
+       JOIN areas a ON a.id = t.area_id
+      WHERE t.id = ? AND a.household_id = ?`,
+  )
+    .bind(taskId, hh)
+    .first();
+  if (!task) throw new HTTPException(404);
+
+  const latest = await c.env.DB.prepare(
+    `SELECT id FROM completions
+      WHERE task_id = ?
+      ORDER BY done_at DESC
+      LIMIT 1`,
+  )
+    .bind(taskId)
+    .first<{ id: string }>();
+  if (!latest) throw new HTTPException(404, { message: "no completion to undo" });
+
+  // SQLite has no MAX-ignoring-NULL trick we need; subquery yields NULL when the
+  // table is empty, which is exactly what we want stamped on tasks.last_done_at.
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM completions WHERE id = ?").bind(latest.id),
+    c.env.DB.prepare(
+      `UPDATE tasks SET last_done_at = (
+         SELECT MAX(done_at) FROM completions WHERE task_id = ?
+       ) WHERE id = ?`,
+    ).bind(taskId, taskId),
+  ]);
+  return c.json({ ok: true });
+});
+
 app.delete("/api/tasks/:id", async (c) => {
   const { hh } = c.get("user");
   const id = c.req.param("id");

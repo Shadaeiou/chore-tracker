@@ -344,3 +344,106 @@ describe("multi-user household sync via invites", () => {
     expect(hh.members.map((m) => m.displayName).sort()).toEqual(["Alice", "Bob"]);
   });
 });
+
+describe("undo task completion", () => {
+  // Helper: create one user, one area, one task. Returns ids + token.
+  async function seed(): Promise<{
+    token: string;
+    taskId: string;
+  }> {
+    const auth = await register({ displayName: "Tester" });
+    const area = (await (await api("/api/areas", {
+      method: "POST",
+      token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST",
+      token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Wipe counter", frequencyDays: 3 }),
+    })).json()) as { id: string };
+    return { token: auth.token, taskId: task.id };
+  }
+
+  async function listTask(token: string, taskId: string): Promise<{
+    lastDoneAt: number | null;
+    lastDoneBy: string | null;
+  } | undefined> {
+    const list = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string;
+      lastDoneAt: number | null;
+      lastDoneBy: string | null;
+    }>;
+    return list.find((t) => t.id === taskId);
+  }
+
+  it("undo reverts a single completion to never-done state", async () => {
+    const { token, taskId } = await seed();
+
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    expect((await listTask(token, taskId))?.lastDoneAt).toBeGreaterThan(0);
+
+    const undo = await api(`/api/tasks/${taskId}/completions/last`, {
+      method: "DELETE",
+      token,
+    });
+    expect(undo.status).toBe(200);
+
+    const after = await listTask(token, taskId);
+    expect(after?.lastDoneAt).toBeNull();
+    expect(after?.lastDoneBy).toBeNull();
+  });
+
+  it("undo with multiple completions rolls back to the previous one", async () => {
+    const { token, taskId } = await seed();
+
+    // Two completions in a row. Sleep 5ms so done_at differs.
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    await new Promise((r) => setTimeout(r, 5));
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    const beforeUndo = (await listTask(token, taskId))?.lastDoneAt!;
+
+    const undo = await api(`/api/tasks/${taskId}/completions/last`, {
+      method: "DELETE",
+      token,
+    });
+    expect(undo.status).toBe(200);
+
+    const after = await listTask(token, taskId);
+    expect(after?.lastDoneAt).toBeGreaterThan(0);
+    expect(after?.lastDoneAt).toBeLessThan(beforeUndo);
+  });
+
+  it("returns 404 when there is nothing to undo", async () => {
+    const { token, taskId } = await seed();
+    const undo = await api(`/api/tasks/${taskId}/completions/last`, {
+      method: "DELETE",
+      token,
+    });
+    expect(undo.status).toBe(404);
+  });
+
+  it("rejects undo from another household", async () => {
+    const { token: aliceToken, taskId } = await seed();
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token: aliceToken });
+
+    const bob = await register({ displayName: "Bob" });
+    const undo = await api(`/api/tasks/${taskId}/completions/last`, {
+      method: "DELETE",
+      token: bob.token,
+    });
+    expect(undo.status).toBe(404);
+
+    // Alice's completion is still there.
+    expect((await listTask(aliceToken, taskId))?.lastDoneAt).toBeGreaterThan(0);
+  });
+
+  it("returns 404 for an unknown task id", async () => {
+    const auth = await register();
+    const undo = await api(
+      `/api/tasks/00000000-0000-0000-0000-000000000000/completions/last`,
+      { method: "DELETE", token: auth.token },
+    );
+    expect(undo.status).toBe(404);
+  });
+});

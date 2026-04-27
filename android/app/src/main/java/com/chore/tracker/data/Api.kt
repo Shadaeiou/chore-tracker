@@ -45,6 +45,9 @@ interface ChoreApi {
     @POST("api/tasks/{id}/complete")
     suspend fun completeTask(@Path("id") id: String)
 
+    @DELETE("api/tasks/{id}/completions/last")
+    suspend fun undoLastCompletion(@Path("id") id: String)
+
     @DELETE("api/tasks/{id}")
     suspend fun deleteTask(@Path("id") id: String)
 }

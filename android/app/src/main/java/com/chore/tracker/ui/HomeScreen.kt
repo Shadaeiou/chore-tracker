@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,6 +28,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -34,7 +38,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,13 +59,18 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(repo: Repo, onSignOut: () -> Unit) {
+fun HomeScreen(
+    repo: Repo,
+    onSignOut: () -> Unit,
+    onOpenSettings: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val state by repo.state.collectAsState()
     var showAddArea by remember { mutableStateOf(false) }
     var showAddTaskFor by remember { mutableStateOf<Area?>(null) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
+    val snackbarHost = remember { SnackbarHostState() }
 
     DisposableEffect(repo) {
         repo.startPolling()
@@ -70,6 +78,7 @@ fun HomeScreen(repo: Repo, onSignOut: () -> Unit) {
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost, modifier = Modifier.testTag("snackbarHost")) },
         topBar = {
             TopAppBar(
                 title = { Text("Chores") },
@@ -83,6 +92,10 @@ fun HomeScreen(repo: Repo, onSignOut: () -> Unit) {
                             }
                         },
                     ) { Icon(Icons.Default.PersonAdd, contentDescription = "Invite") }
+                    IconButton(
+                        modifier = Modifier.testTag("settingsButton"),
+                        onClick = onOpenSettings,
+                    ) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                     IconButton(onClick = {
                         scope.launch { repo.logout(); onSignOut() }
                     }) { Icon(Icons.Default.Logout, contentDescription = "Sign out") }
@@ -124,7 +137,17 @@ fun HomeScreen(repo: Repo, onSignOut: () -> Unit) {
                                 onComplete = { task ->
                                     scope.launch {
                                         runCatching { repo.api.completeTask(task.id) }
-                                            .onSuccess { repo.refresh() }
+                                            .onSuccess {
+                                                repo.refresh()
+                                                val result = snackbarHost.showSnackbar(
+                                                    message = "Marked done",
+                                                    actionLabel = "Undo",
+                                                )
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    runCatching { repo.api.undoLastCompletion(task.id) }
+                                                        .onSuccess { repo.refresh() }
+                                                }
+                                            }
                                     }
                                 },
                             )
