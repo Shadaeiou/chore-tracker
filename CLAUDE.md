@@ -44,9 +44,11 @@ Bootstrap context for any Claude working on this repo. Read this first, then `do
 ```bash
 # Backend
 cd backend && npm ci                    # install deps
-npm run typecheck                       # tsc --noEmit (works on Windows)
-npm test                                # vitest — DOES NOT WORK ON WINDOWS (workerd crashes); CI runs Linux
-npm run dev                             # local wrangler dev (works on Windows)
+npm run typecheck                       # tsc --noEmit
+npm run dev:test                        # wrangler dev --local --port 8788 (for local tests)
+npm run test:local                      # vitest against running dev:test server (~3s)
+npm test                                # vitest-pool-workers — DOES NOT WORK ON WINDOWS; CI only
+npm run dev                             # local wrangler dev (default port 8787)
 npm run migrate:remote                  # apply migrations to live D1
 npm run deploy:ci                       # migrations + deploy (this is what Workers Builds runs)
 
@@ -61,12 +63,32 @@ gh api repos/Shadaeiou/chore-tracker/actions/jobs/<job-id>/logs > /tmp/log.txt  
 gh run download <run-id> --repo Shadaeiou/chore-tracker --name maestro-artifacts # screenshots after Maestro run
 ```
 
+## Local test commands (fast feedback before pushing)
+
+```bash
+# Backend — typecheck only (instant)
+make backend-typecheck
+
+# Backend — full integration tests (~3s)
+# Terminal 1 (keep running):
+cd backend && npm run dev:test      # wrangler dev --local --port 8788
+# Terminal 2:
+make backend-test-local
+
+# Android — JVM/Robolectric unit tests (~1s warm, ~90s cold first run)
+make android-test
+
+# Everything at once (requires wrangler dev running in another terminal)
+make test
+```
+
 ## Local-environment gotchas (Windows)
 
-- **`workerd` (Cloudflare runtime) crashes on Windows** with `0xc0000005` access violation under `npm test`. Backend tests must run on Linux/CI. Locally, only `tsc --noEmit` is reliable. Workaround for full local testing: WSL.
-- **No Android SDK installed.** Cannot build APK or run unit tests locally. Rely on CI for both. Roborazzi (snapshot tests) deferred for the same reason — easy to add blind, hard to debug blind.
-- **No `gradle` on PATH.** GitHub Actions provides it.
-- **gh CLI** is at `~/.local/bin/gh.exe`. Auth tokens have `repo`, `workflow`, `read:org`, `gist` scopes.
+- **`workerd` crashes on Windows** under `npm test` (vitest-pool-workers uses the real workerd binary). Use `make backend-test-local` instead — runs against wrangler dev --local which is stable.
+- **Android SDK** is installed at `C:/Users/burke/android-sdk`. `local.properties` (gitignored) points Gradle at it. Gradle 8.10.2 is at `C:/Users/burke/gradle-8.10.2`.
+- **`gradle` not on PATH by default.** The Makefile sets it up. Don't run `gradle` directly from bash; use `make android-test` or the full path.
+- **APK builds and Maestro E2E** still require CI — no local emulator configured.
+- **gh CLI** is at `/c/Program Files/GitHub CLI/gh`. Auth tokens have `repo`, `workflow`, `read:org`, `gist` scopes.
 
 ## Conventions you must follow
 
