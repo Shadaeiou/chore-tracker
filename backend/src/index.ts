@@ -513,7 +513,7 @@ app.get("/api/debug/fcm", async (c) => {
     const sig = b64(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(`${hdr}.${pay}`)));
     const jwt = `${hdr}.${pay}.${sig}`;
     // Use a raw string body to avoid any URLSearchParams encoding quirks in Workers.
-    const reqBody = `grant_type=urn%3Aietf%3Aparams%3Aoauth2%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
+    const reqBody = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
     const tr = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
