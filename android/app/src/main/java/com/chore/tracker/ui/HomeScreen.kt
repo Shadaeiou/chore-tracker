@@ -127,10 +127,13 @@ fun HomeScreen(
                 != PackageManager.PERMISSION_GRANTED
             ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        // Explicitly request the FCM token — this triggers onNewToken in PushService
-        // if the token hasn't been delivered yet, which handles registration.
+        // Always register the current FCM token on every home screen entry.
+        // onNewToken only fires for new/rotated tokens; for existing tokens we must
+        // explicitly fetch and register here.
         try {
-            Firebase.messaging.token.await()
+            val token = Firebase.messaging.token.await()
+            repo.session.setFcmToken(token)
+            repo.api.registerDeviceToken(com.chore.tracker.data.DeviceTokenRequest(token))
         } catch (_: Throwable) {}
     }
 
