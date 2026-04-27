@@ -64,6 +64,12 @@ interface ChoreApi {
 
     @GET("api/household/workload")
     suspend fun workload(): List<WorkloadEntry>
+
+    @POST("api/device-tokens")
+    suspend fun registerDeviceToken(@Body req: DeviceTokenRequest)
+
+    @DELETE("api/device-tokens/{token}")
+    suspend fun deleteDeviceToken(@Path("token") token: String)
 }
 
 object ApiFactory {

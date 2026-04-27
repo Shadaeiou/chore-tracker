@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "544981795377",
+    "project_id": "chore-tracker-c0f04",
+    "storage_bucket": "chore-tracker-c0f04.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:544981795377:android:6b7e6c5a33ebcd5d7a4b10",
+        "android_client_info": {
+          "package_name": "com.chore.tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBH7hUxk3oJPJA7pNks6WEViKjC3LCONPE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

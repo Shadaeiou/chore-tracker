@@ -47,7 +47,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -59,7 +65,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.core.content.ContextCompat
+import com.google.firebase.ktx.Firebase
+import com.google.firebase.messaging.ktx.messaging
+import kotlinx.coroutines.tasks.await
 import androidx.compose.ui.unit.dp
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.CreateAreaRequest
@@ -79,6 +90,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val state by repo.state.collectAsState()
     var showAddArea by remember { mutableStateOf(false) }
     var showAddTaskFor by remember { mutableStateOf<Area?>(null) }
@@ -90,6 +102,23 @@ fun HomeScreen(
     DisposableEffect(repo) {
         repo.startPolling()
         onDispose { repo.stopPolling() }
+    }
+
+    // Request POST_NOTIFICATIONS permission and register FCM token on first composition.
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* granted or denied — FCM delivery handled by OS regardless of banner permission */ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        try {
+            val token = Firebase.messaging.token.await()
+            repo.session.setFcmToken(token)
+            repo.api.registerDeviceToken(com.chore.tracker.data.DeviceTokenRequest(token))
+        } catch (_: Throwable) {}
     }
 
     Scaffold(

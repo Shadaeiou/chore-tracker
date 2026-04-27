@@ -25,7 +25,7 @@ class Repo(
     val session: Session,
     val api: ChoreApi = ApiFactory.create(session),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    private val pollIntervalMs: Long = 15_000L,
+    private val pollIntervalMs: Long = 60_000L,
 ) {
     private val _state = MutableStateFlow(HouseholdState())
     val state: StateFlow<HouseholdState> = _state.asStateFlow()
@@ -35,6 +35,7 @@ class Repo(
     suspend fun login(email: String, password: String): AuthResponse {
         val res = api.login(LoginRequest(email, password))
         session.setToken(res.token)
+        registerStoredFcmToken()
         return res
     }
 
@@ -52,10 +53,21 @@ class Repo(
             RegisterRequest(email, password, displayName, householdName, inviteCode),
         )
         session.setToken(res.token)
+        registerStoredFcmToken()
         return res
     }
 
+    /** If an FCM token was stored before login (e.g. from PushService.onNewToken), register it now. */
+    private suspend fun registerStoredFcmToken() {
+        val token = session.fcmToken() ?: return
+        try { api.registerDeviceToken(DeviceTokenRequest(token)) } catch (_: Throwable) {}
+    }
+
     suspend fun logout() {
+        session.fcmToken()?.let { token ->
+            try { api.deleteDeviceToken(token) } catch (_: Throwable) {}
+            session.setFcmToken(null)
+        }
         session.setToken(null)
         _state.value = HouseholdState()
     }

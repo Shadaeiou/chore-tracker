@@ -68,6 +68,9 @@ data class PatchTaskRequest(
 )
 
 @Serializable
+data class DeviceTokenRequest(val token: String, val platform: String = "android")
+
+@Serializable
 data class ActivityEntry(
     val id: String,
     val taskId: String,

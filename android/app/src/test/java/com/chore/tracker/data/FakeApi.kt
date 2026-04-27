@@ -80,4 +80,6 @@ class FakeApi : ChoreApi {
         maybeThrow(); return activityFeed.toList()
     }
     override suspend fun workload(): List<WorkloadEntry> { maybeThrow(); return workloadData.toList() }
+    override suspend fun registerDeviceToken(req: DeviceTokenRequest) { maybeThrow() }
+    override suspend fun deleteDeviceToken(token: String) { maybeThrow() }
 }

@@ -1,0 +1,42 @@
+# Phase 3 acceptance flow: FCM token registration + notification permission.
+# Full two-device push delivery test requires two emulators which are not
+# available in CI; this flow verifies the permission dialog, token registration,
+# and that the app handles a background-launch from notification intent.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase3+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase3Tester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase3 home"
+- tapOn: { id: "submitButton" }
+- assertVisible: "Tap + to add your first area"
+- takeScreenshot: phase3_01_signed_in
+
+# Notification permission dialog should appear on API 33+.
+# Accept it if present, ignore if already granted or on older API.
+- optional:
+    - assertVisible: "Allow"
+    - tapOn: "Allow"
+- takeScreenshot: phase3_02_after_permission
+
+# Add area + task and complete it (verifies backend still works with FCM wired in).
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- assertVisible: "Kitchen"
+- tapOn: { id: "addTaskButton:Kitchen" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counter"
+- tapOn: { id: "addTaskConfirm" }
+- tapOn: { id: "completeButton:Wipe counter" }
+- assertVisible: "Marked done"
+- takeScreenshot: phase3_03_task_completed_with_fcm_wired

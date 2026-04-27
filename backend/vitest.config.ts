@@ -16,6 +16,7 @@ export default defineWorkersConfig(async () => {
             bindings: {
               JWT_SECRET: "test-secret-not-for-prod",
               TEST_MIGRATIONS: migrations,
+              FCM_SERVICE_ACCOUNT: "", // empty → FCM skipped in tests
             },
           },
         },

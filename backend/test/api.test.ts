@@ -737,3 +737,55 @@ describe("GET /api/household/workload", () => {
     expect(workload.every((w) => w.userId !== bob.userId)).toBe(true);
   });
 });
+
+describe("device tokens", () => {
+  it("registers and deregisters a token", async () => {
+    const auth = await register();
+    const res = await api("/api/device-tokens", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ token: "fcm-token-abc", platform: "android" }),
+    });
+    expect(res.status).toBe(200);
+
+    const del = await api("/api/device-tokens/fcm-token-abc", {
+      method: "DELETE", token: auth.token,
+    });
+    expect(del.status).toBe(200);
+  });
+
+  it("upserts on duplicate token (same token, new user)", async () => {
+    const alice = await register();
+    const { code } = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: code });
+
+    await api("/api/device-tokens", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ token: "shared-device-token", platform: "android" }),
+    });
+    // Bob registers same token (same physical device, re-logged-in)
+    const res = await api("/api/device-tokens", {
+      method: "POST", token: bob.token,
+      body: JSON.stringify({ token: "shared-device-token", platform: "android" }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects missing token field", async () => {
+    const auth = await register();
+    const res = await api("/api/device-tokens", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ platform: "android" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("delete is a no-op for unknown token", async () => {
+    const auth = await register();
+    const res = await api("/api/device-tokens/nonexistent-token", {
+      method: "DELETE", token: auth.token,
+    });
+    expect(res.status).toBe(200);
+  });
+});

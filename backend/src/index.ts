@@ -10,10 +10,12 @@ import {
   verifyPassword,
   type JwtPayload,
 } from "./auth";
+import { sendToTokens } from "./fcm";
 
 type Bindings = {
   DB: D1Database;
   JWT_SECRET: string;
+  FCM_SERVICE_ACCOUNT: string;
 };
 
 type Variables = {
@@ -327,12 +329,12 @@ app.post("/api/tasks/:id/complete", async (c) => {
   const taskId = c.req.param("id");
 
   const task = await c.env.DB.prepare(
-    `SELECT t.id, t.auto_rotate, t.assigned_to FROM tasks t
+    `SELECT t.id, t.name, t.auto_rotate, t.assigned_to FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
   )
     .bind(taskId, hh)
-    .first<{ id: string; auto_rotate: number; assigned_to: string | null }>();
+    .first<{ id: string; name: string; auto_rotate: number; assigned_to: string | null }>();
   if (!task) throw new HTTPException(404);
 
   const now = Date.now();
@@ -359,6 +361,29 @@ app.post("/api/tasks/:id/complete", async (c) => {
   }
 
   await c.env.DB.batch(stmts);
+
+  // Fan-out push notifications to all household members except the actor.
+  if (c.env.FCM_SERVICE_ACCOUNT) {
+    const { results: tokenRows } = await c.env.DB.prepare(
+      `SELECT dt.token FROM device_tokens dt
+         JOIN users u ON u.id = dt.user_id
+        WHERE u.household_id = ? AND dt.user_id != ?`,
+    ).bind(hh, sub).all<{ token: string }>();
+    const tokens = tokenRows.map((r) => r.token);
+    if (tokens.length > 0) {
+      const actor = await c.env.DB.prepare(
+        "SELECT display_name FROM users WHERE id = ?",
+      ).bind(sub).first<{ display_name: string }>();
+      c.executionCtx.waitUntil(
+        sendToTokens(
+          tokens,
+          { title: "Chore completed", body: `${actor?.display_name ?? "Someone"} completed "${task.name}"` },
+          c.env,
+        ),
+      );
+    }
+  }
+
   return c.json({ ok: true, doneAt: now });
 });
 
@@ -434,6 +459,31 @@ app.delete("/api/tasks/:id/completions/last", async (c) => {
        ) WHERE id = ?`,
     ).bind(taskId, taskId),
   ]);
+  return c.json({ ok: true });
+});
+
+// ---------- Device tokens ----------
+
+app.post("/api/device-tokens", async (c) => {
+  const { sub } = c.get("user");
+  const body = await c.req.json<{ token: string; platform: string }>();
+  if (!body.token || !body.platform)
+    throw new HTTPException(400, { message: "token and platform required" });
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO device_tokens (token, user_id, platform, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, updated_at = excluded.updated_at`,
+  ).bind(body.token, sub, body.platform, now).run();
+  return c.json({ ok: true });
+});
+
+app.delete("/api/device-tokens/:token", async (c) => {
+  const { sub } = c.get("user");
+  const token = c.req.param("token");
+  await c.env.DB.prepare(
+    "DELETE FROM device_tokens WHERE token = ? AND user_id = ?",
+  ).bind(token, sub).run();
   return c.json({ ok: true });
 });
 
