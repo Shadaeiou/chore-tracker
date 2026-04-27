@@ -42,6 +42,10 @@ data class Task(
     val lastDoneAt: Long? = null,
     val lastDoneBy: String? = null,
     val createdAt: Long,
+    val assignedTo: String? = null,
+    val assignedToName: String? = null,
+    val autoRotate: Boolean = false,
+    val effortPoints: Int = 1,
 )
 
 @Serializable
@@ -49,6 +53,35 @@ data class CreateTaskRequest(
     val areaId: String,
     val name: String,
     val frequencyDays: Int,
+    val assignedTo: String? = null,
+    val autoRotate: Boolean = false,
+    val effortPoints: Int = 1,
+)
+
+@Serializable
+data class PatchTaskRequest(
+    val name: String? = null,
+    val frequencyDays: Int? = null,
+    val assignedTo: String? = null,
+    val autoRotate: Boolean? = null,
+    val effortPoints: Int? = null,
+)
+
+@Serializable
+data class ActivityEntry(
+    val id: String,
+    val taskId: String,
+    val taskName: String,
+    val areaName: String,
+    val doneBy: String,
+    val doneAt: Long,
+)
+
+@Serializable
+data class WorkloadEntry(
+    val userId: String,
+    val displayName: String,
+    val effortPoints: Int,
 )
 
 @Serializable

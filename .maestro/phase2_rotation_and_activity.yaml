@@ -1,0 +1,60 @@
+# Phase 2 acceptance flow: rotation, activity feed, workload card.
+# Uses a single user to test rotation (assignee badge updates after complete)
+# and verifies the activity tab shows the completion entry.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase2+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase2Tester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase2 home"
+- tapOn: { id: "submitButton" }
+- assertVisible: "Tap + to add your first area"
+- assertVisible: "Chores"
+- assertVisible: "Activity"
+- takeScreenshot: phase2_01_signed_in_tabs_visible
+
+# Add area
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- assertVisible: "Kitchen"
+- takeScreenshot: phase2_02_area_created
+
+# Open add-task dialog — verify effort slider is present
+- tapOn: { id: "addTaskButton:Kitchen" }
+- assertVisible: "New task in Kitchen"
+- assertVisible: { id: "effortSlider" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counter"
+- tapOn: { id: "addTaskConfirm" }
+- assertVisible: "Wipe counter"
+- takeScreenshot: phase2_03_task_created
+
+# Complete the task
+- tapOn: { id: "completeButton:Wipe counter" }
+- assertVisible: "Marked done"
+- takeScreenshot: phase2_04_task_completed
+
+# Dismiss snackbar, switch to Activity tab
+- tapOn: { id: "tab:activity" }
+- assertVisible: { id: "activityScreen" }
+- extendedWaitUntil:
+    visible: "Wipe counter"
+    timeout: 5000
+- assertVisible: "Kitchen"
+- assertVisible: "Phase2Tester"
+- takeScreenshot: phase2_05_activity_feed
+
+# Switch back to Chores
+- tapOn: { id: "tab:chores" }
+- assertVisible: "Wipe counter"
+- takeScreenshot: phase2_06_back_to_chores

@@ -9,10 +9,13 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.chore.tracker.data.Area
+import com.chore.tracker.data.ActivityEntry
 import com.chore.tracker.data.FakeApi
 import com.chore.tracker.data.InMemorySession
+import com.chore.tracker.data.Member
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Task
+import com.chore.tracker.data.WorkloadEntry
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -152,5 +155,68 @@ class HomeScreenTest {
         }
         compose.onNodeWithTag("settingsButton").performClick()
         assertThat(opened).isTrue()
+    }
+
+    @Test fun `chores and activity tabs are present`() {
+        val repo = newRepo(FakeApi())
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+        compose.onNodeWithTag("tab:chores").assertIsDisplayed()
+        compose.onNodeWithTag("tab:activity").assertIsDisplayed()
+    }
+
+    @Test fun `tapping activity tab shows activity screen`() {
+        val fake = FakeApi().apply {
+            activityFeed.add(
+                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", System.currentTimeMillis()),
+            )
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("tab:activity").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("tab:activity").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("activityScreen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("activityScreen").assertIsDisplayed()
+    }
+
+    @Test fun `workload card renders when data is present`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            workloadData.add(WorkloadEntry("u1", "Alice", 5))
+            workloadData.add(WorkloadEntry("u2", "Bob", 2))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("workloadCard").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("workloadCard").assertIsDisplayed()
+        compose.onNodeWithTag("workloadName:Alice").assertIsDisplayed()
+        compose.onNodeWithTag("workloadName:Bob").assertIsDisplayed()
+    }
+
+    @Test fun `add task dialog shows effort slider and assignee picker when members present`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            members.add(Member("u1", "Alice", "alice@example.com"))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("addTaskButton:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("addTaskButton:Kitchen").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("addTaskDialog").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("effortSlider").assertIsDisplayed()
+        compose.onNodeWithTag("assigneePicker").assertIsDisplayed()
+        compose.onNodeWithTag("autoRotateToggle").assertIsDisplayed()
     }
 }

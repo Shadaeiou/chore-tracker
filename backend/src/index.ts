@@ -249,13 +249,16 @@ app.delete("/api/areas/:id", async (c) => {
 
 app.get("/api/tasks", async (c) => {
   const { hh } = c.get("user");
-  // LEFT JOIN to the latest completion per task to surface attribution.
   const { results } = await c.env.DB.prepare(
     `SELECT t.id, t.area_id AS areaId, t.name,
             t.frequency_days AS frequencyDays,
-            t.last_done_at  AS lastDoneAt,
-            t.created_at    AS createdAt,
-            u.display_name  AS lastDoneBy
+            t.last_done_at   AS lastDoneAt,
+            t.created_at     AS createdAt,
+            t.assigned_to    AS assignedTo,
+            t.auto_rotate    AS autoRotate,
+            t.effort_points  AS effortPoints,
+            u.display_name   AS lastDoneBy,
+            ua.display_name  AS assignedToName
        FROM tasks t
        JOIN areas a ON a.id = t.area_id
        LEFT JOIN completions c ON c.id = (
@@ -264,6 +267,7 @@ app.get("/api/tasks", async (c) => {
           ORDER BY done_at DESC LIMIT 1
        )
        LEFT JOIN users u ON u.id = c.user_id
+       LEFT JOIN users ua ON ua.id = t.assigned_to
       WHERE a.household_id = ?
       ORDER BY t.created_at`,
   )
@@ -273,13 +277,16 @@ app.get("/api/tasks", async (c) => {
 });
 
 app.post("/api/tasks", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const body = await c.req.json<{
     areaId: string;
     name: string;
     frequencyDays: number;
+    assignedTo?: string;
+    autoRotate?: boolean;
+    effortPoints?: number;
   }>();
-  if (!body.areaId || !body.name || !body.frequencyDays)
+  if (!body.areaId || !body.name || !body.frequencyDays || body.frequencyDays <= 0)
     throw new HTTPException(400, { message: "missing fields" });
 
   const area = await c.env.DB.prepare(
@@ -289,19 +296,26 @@ app.post("/api/tasks", async (c) => {
     .first();
   if (!area) throw new HTTPException(404, { message: "area not found" });
 
+  const assignedTo = body.assignedTo ?? sub;
+  const autoRotate = body.autoRotate ? 1 : 0;
+  const effortPoints = body.effortPoints ?? 1;
   const id = newId();
   const now = Date.now();
   await c.env.DB.prepare(
-    `INSERT INTO tasks (id, area_id, name, frequency_days, last_done_at, created_at)
-     VALUES (?, ?, ?, ?, NULL, ?)`,
+    `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
   )
-    .bind(id, body.areaId, body.name, body.frequencyDays, now)
+    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, now)
     .run();
   return c.json({
     id,
     areaId: body.areaId,
     name: body.name,
     frequencyDays: body.frequencyDays,
+    assignedTo,
+    assignedToName: null,
+    autoRotate: body.autoRotate ?? false,
+    effortPoints,
     lastDoneAt: null,
     lastDoneBy: null,
     createdAt: now,
@@ -313,26 +327,76 @@ app.post("/api/tasks/:id/complete", async (c) => {
   const taskId = c.req.param("id");
 
   const task = await c.env.DB.prepare(
-    `SELECT t.id FROM tasks t
+    `SELECT t.id, t.auto_rotate, t.assigned_to FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
   )
     .bind(taskId, hh)
-    .first();
+    .first<{ id: string; auto_rotate: number; assigned_to: string | null }>();
   if (!task) throw new HTTPException(404);
 
   const now = Date.now();
   const completionId = newId();
-  await c.env.DB.batch([
+  const stmts: D1PreparedStatement[] = [
     c.env.DB.prepare(
       "INSERT INTO completions (id, task_id, user_id, done_at) VALUES (?, ?, ?, ?)",
     ).bind(completionId, taskId, sub, now),
-    c.env.DB.prepare("UPDATE tasks SET last_done_at = ? WHERE id = ?").bind(
-      now,
-      taskId,
-    ),
-  ]);
+    c.env.DB.prepare("UPDATE tasks SET last_done_at = ? WHERE id = ?").bind(now, taskId),
+  ];
+
+  if (task.auto_rotate) {
+    const { results: members } = await c.env.DB.prepare(
+      "SELECT id FROM users WHERE household_id = ? ORDER BY created_at",
+    ).bind(hh).all<{ id: string }>();
+    if (members.length > 1) {
+      const idx = members.findIndex((m) => m.id === task.assigned_to);
+      const nextIdx = idx === -1 ? 0 : (idx + 1) % members.length;
+      stmts.push(
+        c.env.DB.prepare("UPDATE tasks SET assigned_to = ? WHERE id = ?")
+          .bind(members[nextIdx].id, taskId),
+      );
+    }
+  }
+
+  await c.env.DB.batch(stmts);
   return c.json({ ok: true, doneAt: now });
+});
+
+app.patch("/api/tasks/:id", async (c) => {
+  const { hh } = c.get("user");
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    name?: string;
+    frequencyDays?: number;
+    assignedTo?: string | null;
+    autoRotate?: boolean;
+    effortPoints?: number;
+  }>();
+
+  const task = await c.env.DB.prepare(
+    `SELECT t.id FROM tasks t
+       JOIN areas a ON a.id = t.area_id
+      WHERE t.id = ? AND a.household_id = ?`,
+  ).bind(id, hh).first();
+  if (!task) throw new HTTPException(404);
+
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if (body.name !== undefined) { sets.push("name = ?"); bindings.push(body.name); }
+  if (body.frequencyDays !== undefined) {
+    if (body.frequencyDays <= 0) throw new HTTPException(400, { message: "frequencyDays must be positive" });
+    sets.push("frequency_days = ?"); bindings.push(body.frequencyDays);
+  }
+  if ("assignedTo" in body) { sets.push("assigned_to = ?"); bindings.push(body.assignedTo ?? null); }
+  if (body.autoRotate !== undefined) { sets.push("auto_rotate = ?"); bindings.push(body.autoRotate ? 1 : 0); }
+  if (body.effortPoints !== undefined) { sets.push("effort_points = ?"); bindings.push(body.effortPoints); }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+
+  bindings.push(id);
+  await c.env.DB.prepare(
+    `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`,
+  ).bind(...bindings).run();
+  return c.json({ ok: true });
 });
 
 // Undo: delete the most-recent completion for this task and recompute
@@ -371,6 +435,54 @@ app.delete("/api/tasks/:id/completions/last", async (c) => {
     ).bind(taskId, taskId),
   ]);
   return c.json({ ok: true });
+});
+
+// ---------- Activity feed ----------
+
+app.get("/api/activity", async (c) => {
+  const { hh } = c.get("user");
+  const beforeParam = c.req.query("before");
+  const before = beforeParam ? parseInt(beforeParam) : Date.now() + 1;
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "50"), 100);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT c.id, c.task_id AS taskId, t.name AS taskName,
+            a.name AS areaName, u.display_name AS doneBy, c.done_at AS doneAt
+       FROM completions c
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+       JOIN users u ON u.id = c.user_id
+      WHERE a.household_id = ?
+        AND c.done_at < ?
+      ORDER BY c.done_at DESC
+      LIMIT ?`,
+  ).bind(hh, before, limit).all();
+  return c.json(results);
+});
+
+// ---------- Workload ----------
+
+app.get("/api/household/workload", async (c) => {
+  const { hh } = c.get("user");
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT u.id AS userId, u.display_name AS displayName,
+            COALESCE(SUM(sq.effort_points), 0) AS effortPoints
+       FROM users u
+       LEFT JOIN (
+         SELECT c.user_id, t.effort_points
+           FROM completions c
+           JOIN tasks t ON t.id = c.task_id
+           JOIN areas a ON a.id = t.area_id
+          WHERE a.household_id = ? AND c.done_at >= ?
+       ) sq ON sq.user_id = u.id
+      WHERE u.household_id = ?
+      GROUP BY u.id
+      ORDER BY effortPoints DESC`,
+  ).bind(hh, monthStart, hh).all();
+  return c.json(results);
 });
 
 app.delete("/api/tasks/:id", async (c) => {

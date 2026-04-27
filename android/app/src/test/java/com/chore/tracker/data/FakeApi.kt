@@ -7,6 +7,9 @@ package com.chore.tracker.data
 class FakeApi : ChoreApi {
     var areas: MutableList<Area> = mutableListOf()
     var tasks: MutableList<Task> = mutableListOf()
+    var members: MutableList<Member> = mutableListOf()
+    var activityFeed: MutableList<ActivityEntry> = mutableListOf()
+    var workloadData: MutableList<WorkloadEntry> = mutableListOf()
     var inviteCode: String = "INVITE-1234"
     var nextAuth: AuthResponse = AuthResponse("jwt", "user-1", "hh-1")
     var raise: Throwable? = null
@@ -14,6 +17,7 @@ class FakeApi : ChoreApi {
     val completed = mutableListOf<String>()
     val createdAreas = mutableListOf<CreateAreaRequest>()
     val createdTasks = mutableListOf<CreateTaskRequest>()
+    val patched = mutableListOf<Pair<String, PatchTaskRequest>>()
     var refreshes = 0
 
     private fun maybeThrow() { raise?.let { throw it } }
@@ -22,7 +26,7 @@ class FakeApi : ChoreApi {
     override suspend fun login(req: LoginRequest): AuthResponse { maybeThrow(); return nextAuth }
     override suspend fun household(): HouseholdResponse {
         maybeThrow()
-        return HouseholdResponse(Household("hh-1", "Home", 0), emptyList())
+        return HouseholdResponse(Household("hh-1", "Home", 0), members.toList())
     }
     override suspend fun createInvite(): Invite { maybeThrow(); return Invite(inviteCode, expiresAt = 0) }
     override suspend fun areas(): List<Area> { maybeThrow(); refreshes += 1; return areas.toList() }
@@ -40,9 +44,25 @@ class FakeApi : ChoreApi {
             areaId = req.areaId,
             name = req.name,
             frequencyDays = req.frequencyDays,
+            assignedTo = req.assignedTo,
+            autoRotate = req.autoRotate,
+            effortPoints = req.effortPoints,
             createdAt = 0,
         )
         tasks.add(t); createdTasks.add(req); return t
+    }
+    override suspend fun patchTask(id: String, req: PatchTaskRequest) {
+        maybeThrow()
+        patched.add(id to req)
+        tasks.replaceAll { t ->
+            if (t.id != id) t else t.copy(
+                name = req.name ?: t.name,
+                frequencyDays = req.frequencyDays ?: t.frequencyDays,
+                assignedTo = if (req.assignedTo !== null) req.assignedTo else t.assignedTo,
+                autoRotate = req.autoRotate ?: t.autoRotate,
+                effortPoints = req.effortPoints ?: t.effortPoints,
+            )
+        }
     }
     override suspend fun completeTask(id: String) {
         maybeThrow()
@@ -56,4 +76,8 @@ class FakeApi : ChoreApi {
         tasks.replaceAll { if (it.id == id) it.copy(lastDoneAt = null, lastDoneBy = null) else it }
     }
     override suspend fun deleteTask(id: String) { maybeThrow(); tasks.removeAll { it.id == id } }
+    override suspend fun activity(before: Long?, limit: Int?): List<ActivityEntry> {
+        maybeThrow(); return activityFeed.toList()
+    }
+    override suspend fun workload(): List<WorkloadEntry> { maybeThrow(); return workloadData.toList() }
 }

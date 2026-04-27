@@ -2,6 +2,9 @@ package com.chore.tracker.data
 
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
+import com.chore.tracker.data.ActivityEntry
+import com.chore.tracker.data.Member
+import com.chore.tracker.data.WorkloadEntry
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -76,6 +79,20 @@ class RepoTest {
         // Polled at t=0, ~1000, ~2000.
         assertThat(refreshesAfterStop).isAtLeast(3)
         assertThat(fake.refreshes).isEqualTo(refreshesAfterStop)
+    }
+
+    @Test fun `refresh populates members, activity, and workload`() = runTest {
+        val fake = FakeApi().apply {
+            members.add(Member("u1", "Alice", "alice@example.com"))
+            activityFeed.add(ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", 0L))
+            workloadData.add(WorkloadEntry("u1", "Alice", 3))
+        }
+        val repo = newRepo(this, fake)
+        repo.refresh()
+        val state = repo.state.value
+        assertThat(state.members).hasSize(1)
+        assertThat(state.activity.first().taskName).isEqualTo("Vacuum")
+        assertThat(state.workload.first().effortPoints).isEqualTo(3)
     }
 
     @Test fun `logout clears session token and resets state`() = runTest {

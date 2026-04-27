@@ -447,3 +447,279 @@ describe("undo task completion", () => {
     expect(undo.status).toBe(404);
   });
 });
+
+describe("cross-household delete guards", () => {
+  it("rejects deleting another household's area", async () => {
+    const alice = await register();
+    const bob = await register();
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Alice's Kitchen" }),
+    })).json()) as { id: string };
+
+    const res = await api(`/api/areas/${area.id}`, { method: "DELETE", token: bob.token });
+    expect(res.status).toBe(404);
+
+    // Alice's area still exists.
+    const aliceAreas = (await (await api("/api/areas", { token: alice.token })).json()) as Array<unknown>;
+    expect(aliceAreas).toHaveLength(1);
+  });
+
+  it("rejects deleting another household's task", async () => {
+    const alice = await register();
+    const bob = await register();
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Garage" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Sweep", frequencyDays: 7 }),
+    })).json()) as { id: string };
+
+    const res = await api(`/api/tasks/${task.id}`, { method: "DELETE", token: bob.token });
+    expect(res.status).toBe(404);
+
+    const aliceTasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<unknown>;
+    expect(aliceTasks).toHaveLength(1);
+  });
+});
+
+describe("PATCH /api/tasks/:id", () => {
+  async function seedTask(): Promise<{ token: string; taskId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Room" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Clean", frequencyDays: 7 }),
+    })).json()) as { id: string };
+    return { token: auth.token, taskId: task.id };
+  }
+
+  it("updates name and frequencyDays", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ name: "Deep clean", frequencyDays: 14 }),
+    });
+    expect(res.status).toBe(200);
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; name: string; frequencyDays: number;
+    }>;
+    const t = tasks.find((t) => t.id === taskId)!;
+    expect(t.name).toBe("Deep clean");
+    expect(t.frequencyDays).toBe(14);
+  });
+
+  it("updates autoRotate and effortPoints", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ autoRotate: true, effortPoints: 3 }),
+    });
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; autoRotate: boolean; effortPoints: number;
+    }>;
+    const t = tasks.find((t) => t.id === taskId)!;
+    expect(t.autoRotate).toBe(1); // stored as integer in D1
+    expect(t.effortPoints).toBe(3);
+  });
+
+  it("rejects invalid frequencyDays", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ frequencyDays: -1 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects empty patch body", async () => {
+    const { token, taskId } = await seedTask();
+    const res = await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects patching another household's task", async () => {
+    const { taskId } = await seedTask();
+    const bob = await register();
+    const res = await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token: bob.token,
+      body: JSON.stringify({ name: "Hijack" }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("rotation", () => {
+  it("auto-rotate advances assigned_to on completion", async () => {
+    const alice = await register({ displayName: "Alice" });
+    const { code } = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ displayName: "Bob", inviteCode: code });
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({
+        areaId: area.id, name: "Mop", frequencyDays: 7,
+        assignedTo: alice.userId, autoRotate: true,
+      }),
+    })).json()) as { id: string; assignedTo: string };
+    expect(task.assignedTo).toBe(alice.userId);
+
+    // Alice completes → should rotate to Bob.
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+
+    const tasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<{
+      id: string; assignedTo: string;
+    }>;
+    const updated = tasks.find((t) => t.id === task.id)!;
+    expect(updated.assignedTo).toBe(bob.userId);
+  });
+
+  it("non-rotating task keeps assignee after completion", async () => {
+    const alice = await register({ displayName: "Alice" });
+    const { code } = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    await register({ displayName: "Bob", inviteCode: code });
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Bath" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({
+        areaId: area.id, name: "Scrub", frequencyDays: 7,
+        assignedTo: alice.userId, autoRotate: false,
+      }),
+    })).json()) as { id: string };
+
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+
+    const tasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<{
+      id: string; assignedTo: string;
+    }>;
+    expect(tasks.find((t) => t.id === task.id)!.assignedTo).toBe(alice.userId);
+  });
+});
+
+describe("GET /api/activity", () => {
+  it("returns completions in DESC order, scoped to household", async () => {
+    const alice = await register({ displayName: "Alice" });
+    const bob = await register({ displayName: "Bob" });
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Living room" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Vacuum", frequencyDays: 7 }),
+    })).json()) as { id: string };
+
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+    await new Promise((r) => setTimeout(r, 5));
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+
+    const activity = (await (await api("/api/activity", { token: alice.token })).json()) as Array<{
+      taskName: string; areaName: string; doneBy: string; doneAt: number;
+    }>;
+    expect(activity).toHaveLength(2);
+    expect(activity[0].doneAt).toBeGreaterThan(activity[1].doneAt);
+    expect(activity[0].taskName).toBe("Vacuum");
+    expect(activity[0].areaName).toBe("Living room");
+    expect(activity[0].doneBy).toBe("Alice");
+
+    // Bob's household sees nothing.
+    const bobActivity = (await (await api("/api/activity", { token: bob.token })).json()) as Array<unknown>;
+    expect(bobActivity).toHaveLength(0);
+  });
+
+  it("paginates via before parameter", async () => {
+    const alice = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Room" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Task", frequencyDays: 1 }),
+    })).json()) as { id: string };
+
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+    await new Promise((r) => setTimeout(r, 5));
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+
+    const all = (await (await api("/api/activity", { token: alice.token })).json()) as Array<{ doneAt: number }>;
+    expect(all).toHaveLength(2);
+
+    const older = (await (await api(`/api/activity?before=${all[0].doneAt}`, {
+      token: alice.token,
+    })).json()) as Array<{ doneAt: number }>;
+    expect(older).toHaveLength(1);
+    expect(older[0].doneAt).toBe(all[1].doneAt);
+  });
+});
+
+describe("GET /api/household/workload", () => {
+  it("sums effort points per member for current month completions", async () => {
+    const alice = await register({ displayName: "Alice" });
+    const { code } = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ displayName: "Bob", inviteCode: code });
+
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const bigTask = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Deep clean", frequencyDays: 30, effortPoints: 3 }),
+    })).json()) as { id: string };
+    const smallTask = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Quick wipe", frequencyDays: 7, effortPoints: 1 }),
+    })).json()) as { id: string };
+
+    // Alice does the big task twice (6 points), Bob does the small task once (1 point).
+    await api(`/api/tasks/${bigTask.id}/complete`, { method: "POST", token: alice.token });
+    await api(`/api/tasks/${bigTask.id}/complete`, { method: "POST", token: alice.token });
+    await api(`/api/tasks/${smallTask.id}/complete`, { method: "POST", token: bob.token });
+
+    const workload = (await (await api("/api/household/workload", { token: alice.token })).json()) as Array<{
+      userId: string; displayName: string; effortPoints: number;
+    }>;
+
+    const aliceEntry = workload.find((w) => w.userId === alice.userId)!;
+    const bobEntry = workload.find((w) => w.userId === bob.userId)!;
+    expect(aliceEntry.effortPoints).toBe(6);
+    expect(bobEntry.effortPoints).toBe(1);
+  });
+
+  it("is scoped to the caller's household", async () => {
+    const alice = await register({ displayName: "Alice" });
+    const bob = await register({ displayName: "Bob" });
+
+    const workload = (await (await api("/api/household/workload", { token: alice.token })).json()) as Array<{
+      userId: string;
+    }>;
+    expect(workload.every((w) => w.userId !== bob.userId)).toBe(true);
+  });
+});

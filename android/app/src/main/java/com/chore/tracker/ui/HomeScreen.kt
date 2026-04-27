@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -20,17 +22,25 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -40,6 +50,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,10 +64,12 @@ import androidx.compose.ui.unit.dp
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.CreateAreaRequest
 import com.chore.tracker.data.CreateTaskRequest
+import com.chore.tracker.data.Member
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.dirtiness
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +85,7 @@ fun HomeScreen(
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     DisposableEffect(repo) {
         repo.startPolling()
@@ -89,6 +104,7 @@ fun HomeScreen(
                             scope.launch {
                                 runCatching { repo.api.createInvite() }
                                     .onSuccess { inviteCode = it.code }
+                                    .onFailure { snackbarHost.showSnackbar("Invite failed: ${it.message}") }
                             }
                         },
                     ) { Icon(Icons.Default.PersonAdd, contentDescription = "Invite") }
@@ -103,58 +119,92 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                modifier = Modifier.testTag("addAreaFab"),
-                onClick = { showAddArea = true },
-            ) { Icon(Icons.Default.Add, contentDescription = "Add area") }
+            if (selectedTab == 0) {
+                FloatingActionButton(
+                    modifier = Modifier.testTag("addAreaFab"),
+                    onClick = { showAddArea = true },
+                ) { Icon(Icons.Default.Add, contentDescription = "Add area") }
+            }
         },
     ) { padding ->
-        PullToRefreshBox(
-            state = pullState,
-            isRefreshing = state.isLoading,
-            onRefresh = { scope.launch { repo.refresh() } },
+        Column(
             modifier = Modifier.fillMaxSize().padding(padding).testTag("homeScreen"),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                state.error?.let {
-                    Text(
-                        it,
-                        modifier = Modifier.padding(16.dp).testTag("homeError"),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                if (state.areas.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Tap + to add your first area")
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-                        items(state.areas, key = { it.id }) { area ->
-                            AreaCard(
-                                area = area,
-                                tasks = state.tasks.filter { it.areaId == area.id },
-                                onAddTask = { showAddTaskFor = area },
-                                onComplete = { task ->
-                                    scope.launch {
-                                        runCatching { repo.api.completeTask(task.id) }
-                                            .onSuccess {
-                                                repo.refresh()
-                                                val result = snackbarHost.showSnackbar(
-                                                    message = "Marked done",
-                                                    actionLabel = "Undo",
-                                                )
-                                                if (result == SnackbarResult.ActionPerformed) {
-                                                    runCatching { repo.api.undoLastCompletion(task.id) }
-                                                        .onSuccess { repo.refresh() }
-                                                }
-                                            }
-                                    }
-                                },
+            TabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    modifier = Modifier.testTag("tab:chores"),
+                    text = { Text("Chores") },
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    modifier = Modifier.testTag("tab:activity"),
+                    text = { Text("Activity") },
+                )
+            }
+            when (selectedTab) {
+                0 -> PullToRefreshBox(
+                    state = pullState,
+                    isRefreshing = state.isLoading,
+                    onRefresh = { scope.launch { repo.refresh() } },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        state.error?.let {
+                            Text(
+                                it,
+                                modifier = Modifier.padding(16.dp).testTag("homeError"),
+                                color = MaterialTheme.colorScheme.error,
                             )
-                            Spacer(Modifier.height(8.dp))
+                        }
+                        if (state.workload.isNotEmpty()) {
+                            WorkloadCard(
+                                entries = state.workload,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                        if (state.areas.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Tap + to add your first area")
+                            }
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                                items(state.areas, key = { it.id }) { area ->
+                                    AreaCard(
+                                        area = area,
+                                        tasks = state.tasks.filter { it.areaId == area.id },
+                                        onAddTask = { showAddTaskFor = area },
+                                        onComplete = { task ->
+                                            scope.launch {
+                                                runCatching { repo.api.completeTask(task.id) }
+                                                    .onSuccess {
+                                                        repo.refresh()
+                                                        val result = snackbarHost.showSnackbar(
+                                                            message = "Marked done",
+                                                            actionLabel = "Undo",
+                                                        )
+                                                        if (result == SnackbarResult.ActionPerformed) {
+                                                            runCatching { repo.api.undoLastCompletion(task.id) }
+                                                                .onSuccess { repo.refresh() }
+                                                                .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
+                                                        }
+                                                    }
+                                                    .onFailure { snackbarHost.showSnackbar("Failed to complete: ${it.message}") }
+                                            }
+                                        },
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            }
                         }
                     }
                 }
+                1 -> ActivityScreen(
+                    activity = state.activity,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
@@ -169,6 +219,7 @@ fun HomeScreen(
                 scope.launch {
                     runCatching { repo.api.createArea(CreateAreaRequest(name)) }
                         .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to create area: ${it.message}") }
                 }
             },
         )
@@ -177,12 +228,25 @@ fun HomeScreen(
     showAddTaskFor?.let { area ->
         AddTaskDialog(
             areaName = area.name,
+            members = state.members,
             onDismiss = { showAddTaskFor = null },
-            onConfirm = { name, freq ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
                 showAddTaskFor = null
                 scope.launch {
-                    runCatching { repo.api.createTask(CreateTaskRequest(area.id, name, freq)) }
+                    runCatching {
+                        repo.api.createTask(
+                            CreateTaskRequest(
+                                areaId = area.id,
+                                name = name,
+                                frequencyDays = freq,
+                                assignedTo = assignedTo,
+                                autoRotate = autoRotate,
+                                effortPoints = effortPoints,
+                            ),
+                        )
+                    }
                         .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to create task: ${it.message}") }
                 }
             },
         )
@@ -250,7 +314,24 @@ private fun TaskRow(task: Task, onComplete: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(task.name)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(task.name, modifier = Modifier.weight(1f))
+                task.assignedToName?.let { name ->
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                            .testTag("assigneeBadge:${task.name}"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            name.take(1).uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(4.dp))
             LinearProgressIndicator(
                 progress = { ratio.coerceIn(0f, 1f) },
@@ -269,7 +350,7 @@ private fun TaskRow(task: Task, onComplete: () -> Unit) {
         ) {
             Box(
                 modifier = Modifier
-                    .background(color, shape = androidx.compose.foundation.shape.CircleShape)
+                    .background(color, shape = CircleShape)
                     .padding(6.dp),
             ) {
                 Icon(Icons.Default.Check, contentDescription = "Done", tint = Color.White)
@@ -309,14 +390,21 @@ private fun TextDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddTaskDialog(
     areaName: String,
+    members: List<Member>,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, frequencyDays: Int) -> Unit,
+    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var freq by remember { mutableStateOf("7") }
+    var selectedMember by remember { mutableStateOf<Member?>(members.firstOrNull()) }
+    var autoRotate by remember { mutableStateOf(false) }
+    var effortPoints by remember { mutableFloatStateOf(1f) }
+    var assigneeExpanded by remember { mutableStateOf(false) }
+
     AlertDialog(
         modifier = Modifier.testTag("addTaskDialog"),
         onDismissRequest = onDismiss,
@@ -335,13 +423,77 @@ private fun AddTaskDialog(
                     label = { Text("Every N days") },
                     modifier = Modifier.testTag("taskFreqField"),
                 )
+                if (members.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = assigneeExpanded,
+                        onExpandedChange = { assigneeExpanded = it },
+                        modifier = Modifier.testTag("assigneePicker"),
+                    ) {
+                        OutlinedTextField(
+                            value = selectedMember?.displayName ?: "Unassigned",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Assign to") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(assigneeExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = assigneeExpanded,
+                            onDismissRequest = { assigneeExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Unassigned") },
+                                onClick = { selectedMember = null; assigneeExpanded = false },
+                            )
+                            members.forEach { member ->
+                                DropdownMenuItem(
+                                    text = { Text(member.displayName) },
+                                    onClick = { selectedMember = member; assigneeExpanded = false },
+                                    modifier = Modifier.testTag("assigneeOption:${member.displayName}"),
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Auto-rotate", modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = autoRotate,
+                            onCheckedChange = { autoRotate = it },
+                            modifier = Modifier.testTag("autoRotateToggle"),
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        "Effort: ${effortPoints.roundToInt()}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Slider(
+                        value = effortPoints,
+                        onValueChange = { effortPoints = it },
+                        valueRange = 1f..5f,
+                        steps = 3,
+                        modifier = Modifier.testTag("effortSlider"),
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = name.isNotBlank() && (freq.toIntOrNull() ?: 0) > 0,
                 modifier = Modifier.testTag("addTaskConfirm"),
-                onClick = { onConfirm(name.trim(), freq.toInt()) },
+                onClick = {
+                    onConfirm(
+                        name.trim(),
+                        freq.toInt(),
+                        selectedMember?.id,
+                        autoRotate,
+                        effortPoints.roundToInt(),
+                    )
+                },
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

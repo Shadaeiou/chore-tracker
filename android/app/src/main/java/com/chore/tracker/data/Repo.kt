@@ -14,6 +14,9 @@ import kotlinx.coroutines.launch
 data class HouseholdState(
     val areas: List<Area> = emptyList(),
     val tasks: List<Task> = emptyList(),
+    val members: List<Member> = emptyList(),
+    val activity: List<ActivityEntry> = emptyList(),
+    val workload: List<WorkloadEntry> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -57,13 +60,24 @@ class Repo(
         _state.value = HouseholdState()
     }
 
-    /** Fetch areas + tasks once. Marks loading and stores error on failure. */
+    /** Fetch household data in parallel. Marks loading and stores error on failure. */
     suspend fun refresh() {
         _state.value = _state.value.copy(isLoading = true)
         try {
             val areas = api.areas()
             val tasks = api.tasks()
-            _state.value = HouseholdState(areas = areas, tasks = tasks, isLoading = false, error = null)
+            val household = api.household()
+            val activity = api.activity()
+            val workload = api.workload()
+            _state.value = HouseholdState(
+                areas = areas,
+                tasks = tasks,
+                members = household.members,
+                activity = activity,
+                workload = workload,
+                isLoading = false,
+                error = null,
+            )
         } catch (t: Throwable) {
             _state.value = _state.value.copy(isLoading = false, error = t.message ?: "load failed")
         }

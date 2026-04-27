@@ -11,8 +11,10 @@ import retrofit2.Retrofit
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface ChoreApi {
     @POST("auth/register")
@@ -42,6 +44,9 @@ interface ChoreApi {
     @POST("api/tasks")
     suspend fun createTask(@Body req: CreateTaskRequest): Task
 
+    @PATCH("api/tasks/{id}")
+    suspend fun patchTask(@Path("id") id: String, @Body req: PatchTaskRequest)
+
     @POST("api/tasks/{id}/complete")
     suspend fun completeTask(@Path("id") id: String)
 
@@ -50,6 +55,15 @@ interface ChoreApi {
 
     @DELETE("api/tasks/{id}")
     suspend fun deleteTask(@Path("id") id: String)
+
+    @GET("api/activity")
+    suspend fun activity(
+        @Query("before") before: Long? = null,
+        @Query("limit") limit: Int? = null,
+    ): List<ActivityEntry>
+
+    @GET("api/household/workload")
+    suspend fun workload(): List<WorkloadEntry>
 }
 
 object ApiFactory {
