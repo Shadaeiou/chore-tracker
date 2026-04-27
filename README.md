@@ -59,24 +59,13 @@ npm run dev                       # http://127.0.0.1:8787
 
 ## Auto-deploy on git push
 
-Two options — pick one.
-
-### Option A — GitHub Actions (already wired up)
-
-`.github/workflows/deploy-backend.yml` runs `wrangler deploy` on every push to `main` that touches `backend/`. Add two repo secrets:
-
-- `CLOUDFLARE_API_TOKEN` — create at <https://dash.cloudflare.com/profile/api-tokens> with the *"Edit Cloudflare Workers"* template, plus *D1: Edit* on the account.
-- `CLOUDFLARE_ACCOUNT_ID` — visible in the Cloudflare dashboard sidebar.
-
-### Option B — Cloudflare Workers Builds (dashboard)
-
-In Cloudflare Dashboard → Workers & Pages → **Create** → **Connect to Git** → pick `shadaeiou/chore-tracker`. Settings:
+Cloudflare Workers Builds is wired up via the dashboard. In Cloudflare Dashboard → Workers & Pages → **Create** → **Connect to Git** → pick `Shadaeiou/chore-tracker`. Settings:
 
 - Root directory: `backend`
 - Build command: `npm ci`
-- Deploy command: `npx wrangler deploy`
+- Deploy command: `npm run deploy:ci`
 
-No GitHub secrets needed — Cloudflare authenticates itself. If you use this, you can delete `.github/workflows/deploy-backend.yml`.
+`deploy:ci` applies any pending D1 migrations, then deploys the Worker. No GitHub secrets needed — Cloudflare authenticates itself via the GitHub App.
 
 ---
 
