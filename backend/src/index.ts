@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import {
   hashPassword,
   newId,
+  newInviteCode,
   signJwt,
   verifyJwt,
   verifyPassword,
@@ -19,6 +20,8 @@ type Variables = {
   user: JwtPayload;
 };
 
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("*", cors());
@@ -32,9 +35,10 @@ app.post("/auth/register", async (c) => {
     email: string;
     password: string;
     displayName: string;
-    householdName: string;
+    householdName?: string;
+    inviteCode?: string;
   }>();
-  if (!body.email || !body.password || !body.displayName || !body.householdName)
+  if (!body.email || !body.password || !body.displayName)
     throw new HTTPException(400, { message: "missing fields" });
   if (body.password.length < 8)
     throw new HTTPException(400, { message: "password too short" });
@@ -47,27 +51,64 @@ app.post("/auth/register", async (c) => {
   if (existing) throw new HTTPException(409, { message: "email taken" });
 
   const now = Date.now();
-  const householdId = newId();
   const userId = newId();
   const { hash, salt } = await hashPassword(body.password);
 
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "INSERT INTO households (id, name, created_at) VALUES (?, ?, ?)",
-    ).bind(householdId, body.householdName, now),
-    c.env.DB.prepare(
-      `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      userId,
-      body.email.toLowerCase(),
-      body.displayName,
-      hash,
-      salt,
-      householdId,
-      now,
-    ),
-  ]);
+  let householdId: string;
+
+  if (body.inviteCode) {
+    // Joining an existing household via invite.
+    const invite = await c.env.DB.prepare(
+      `SELECT household_id, expires_at, used_at FROM invites WHERE code = ?`,
+    )
+      .bind(body.inviteCode)
+      .first<{ household_id: string; expires_at: number; used_at: number | null }>();
+    if (!invite) throw new HTTPException(400, { message: "invalid invite" });
+    if (invite.used_at) throw new HTTPException(400, { message: "invite already used" });
+    if (invite.expires_at < now)
+      throw new HTTPException(400, { message: "invite expired" });
+    householdId = invite.household_id;
+
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        userId,
+        body.email.toLowerCase(),
+        body.displayName,
+        hash,
+        salt,
+        householdId,
+        now,
+      ),
+      c.env.DB.prepare(
+        `UPDATE invites SET used_at = ?, used_by = ? WHERE code = ?`,
+      ).bind(now, userId, body.inviteCode),
+    ]);
+  } else {
+    // Creating a brand-new household.
+    if (!body.householdName)
+      throw new HTTPException(400, { message: "householdName required" });
+    householdId = newId();
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "INSERT INTO households (id, name, created_at) VALUES (?, ?, ?)",
+      ).bind(householdId, body.householdName, now),
+      c.env.DB.prepare(
+        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        userId,
+        body.email.toLowerCase(),
+        body.displayName,
+        hash,
+        salt,
+        householdId,
+        now,
+      ),
+    ]);
+  }
 
   const token = await signJwt(
     { sub: userId, hh: householdId },
@@ -120,6 +161,40 @@ app.use("/api/*", async (c, next) => {
   await next();
 });
 
+// ---------- Household / members ----------
+
+app.get("/api/household", async (c) => {
+  const { hh } = c.get("user");
+  const household = await c.env.DB.prepare(
+    "SELECT id, name, created_at AS createdAt FROM households WHERE id = ?",
+  )
+    .bind(hh)
+    .first();
+  const { results: members } = await c.env.DB.prepare(
+    `SELECT id, display_name AS displayName, email
+       FROM users WHERE household_id = ? ORDER BY created_at`,
+  )
+    .bind(hh)
+    .all();
+  return c.json({ household, members });
+});
+
+// ---------- Invites ----------
+
+app.post("/api/invites", async (c) => {
+  const { sub, hh } = c.get("user");
+  const code = newInviteCode();
+  const now = Date.now();
+  const expiresAt = now + INVITE_TTL_MS;
+  await c.env.DB.prepare(
+    `INSERT INTO invites (code, household_id, created_by, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(code, hh, sub, now, expiresAt)
+    .run();
+  return c.json({ code, expiresAt });
+});
+
 // ---------- Areas ----------
 
 app.get("/api/areas", async (c) => {
@@ -149,7 +224,13 @@ app.post("/api/areas", async (c) => {
   )
     .bind(id, hh, body.name, body.icon ?? null, body.sortOrder ?? 0, now)
     .run();
-  return c.json({ id, name: body.name, icon: body.icon, sortOrder: body.sortOrder ?? 0, createdAt: now });
+  return c.json({
+    id,
+    name: body.name,
+    icon: body.icon,
+    sortOrder: body.sortOrder ?? 0,
+    createdAt: now,
+  });
 });
 
 app.delete("/api/areas/:id", async (c) => {
@@ -168,14 +249,21 @@ app.delete("/api/areas/:id", async (c) => {
 
 app.get("/api/tasks", async (c) => {
   const { hh } = c.get("user");
-  // Returns tasks across the whole household with derived dirtiness ratio.
-  // dirtiness = (now - last_done_at) / (frequency_days * 86_400_000)
-  // null last_done_at => treat as fully due (1.0)
+  // LEFT JOIN to the latest completion per task to surface attribution.
   const { results } = await c.env.DB.prepare(
-    `SELECT t.id, t.area_id AS areaId, t.name, t.frequency_days AS frequencyDays,
-            t.last_done_at AS lastDoneAt, t.created_at AS createdAt
+    `SELECT t.id, t.area_id AS areaId, t.name,
+            t.frequency_days AS frequencyDays,
+            t.last_done_at  AS lastDoneAt,
+            t.created_at    AS createdAt,
+            u.display_name  AS lastDoneBy
        FROM tasks t
        JOIN areas a ON a.id = t.area_id
+       LEFT JOIN completions c ON c.id = (
+         SELECT id FROM completions
+          WHERE task_id = t.id
+          ORDER BY done_at DESC LIMIT 1
+       )
+       LEFT JOIN users u ON u.id = c.user_id
       WHERE a.household_id = ?
       ORDER BY t.created_at`,
   )
@@ -215,6 +303,7 @@ app.post("/api/tasks", async (c) => {
     name: body.name,
     frequencyDays: body.frequencyDays,
     lastDoneAt: null,
+    lastDoneBy: null,
     createdAt: now,
   });
 });

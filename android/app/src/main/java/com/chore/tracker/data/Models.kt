@@ -14,7 +14,8 @@ data class RegisterRequest(
     val email: String,
     val password: String,
     val displayName: String,
-    val householdName: String,
+    val householdName: String? = null,
+    val inviteCode: String? = null,
 )
 
 @Serializable
@@ -39,6 +40,7 @@ data class Task(
     val name: String,
     val frequencyDays: Int,
     val lastDoneAt: Long? = null,
+    val lastDoneBy: String? = null,
     val createdAt: Long,
 )
 
@@ -48,6 +50,18 @@ data class CreateTaskRequest(
     val name: String,
     val frequencyDays: Int,
 )
+
+@Serializable
+data class Invite(val code: String, val expiresAt: Long)
+
+@Serializable
+data class Household(val id: String, val name: String, val createdAt: Long)
+
+@Serializable
+data class Member(val id: String, val displayName: String, val email: String)
+
+@Serializable
+data class HouseholdResponse(val household: Household, val members: List<Member>)
 
 /** Computed dirtiness 0.0 (just done) → 1.0 (due) → >1.0 (overdue). */
 fun Task.dirtiness(now: Long = System.currentTimeMillis()): Double {

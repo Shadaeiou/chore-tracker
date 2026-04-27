@@ -1,6 +1,7 @@
 package com.chore.tracker
 
 import android.app.Application
+import com.chore.tracker.data.DataStoreSession
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
 
@@ -12,7 +13,7 @@ class ChoreApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        session = Session(applicationContext)
+        session = DataStoreSession(applicationContext)
         repo = Repo(session)
     }
 }

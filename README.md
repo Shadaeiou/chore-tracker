@@ -122,22 +122,52 @@ The current build is **debug-signed** — fine for sideloading, not eligible for
 
 ---
 
+## Multi-user sync
+
+Households are shared. The first user creates a household at sign-up. To bring more people in:
+
+1. The existing user taps the **person-add** icon → gets a one-shot invite code (7-day TTL).
+2. The new user picks **Join with code** on the auth screen and registers using the code instead of creating a new household.
+
+Once joined, both clients see the same areas, tasks, and completion attribution. The Android app refreshes via:
+
+- **Pull-to-refresh** on the home screen, and
+- A **15-second polling loop** while the app is foregrounded.
+
+This is sync-by-polling — fine for a chore app where seconds of latency don't matter. Real-time push (WebSockets via a Durable Object per household) is a documented follow-up; not built yet.
+
 ## API surface
 
 All `/api/*` endpoints require `Authorization: Bearer <jwt>`.
 
-| Method | Path                          | Description                           |
-| ------ | ----------------------------- | ------------------------------------- |
-| POST   | `/auth/register`              | Create household + first user         |
-| POST   | `/auth/login`                 | Get JWT                               |
-| GET    | `/api/areas`                  | List areas in household               |
-| POST   | `/api/areas`                  | Create area                           |
-| DELETE | `/api/areas/:id`              | Delete area (cascades tasks)          |
-| GET    | `/api/tasks`                  | List all tasks in household           |
-| POST   | `/api/tasks`                  | Create task                           |
-| POST   | `/api/tasks/:id/complete`     | Mark task done now                    |
-| DELETE | `/api/tasks/:id`              | Delete task                           |
+| Method | Path                          | Description                                                |
+| ------ | ----------------------------- | ---------------------------------------------------------- |
+| POST   | `/auth/register`              | Create household OR join one via `inviteCode`              |
+| POST   | `/auth/login`                 | Get JWT                                                    |
+| GET    | `/api/household`              | Household + member list                                    |
+| POST   | `/api/invites`                | Mint a 7-day invite code                                   |
+| GET    | `/api/areas`                  | List areas                                                 |
+| POST   | `/api/areas`                  | Create area                                                |
+| DELETE | `/api/areas/:id`              | Delete area (cascades tasks)                               |
+| GET    | `/api/tasks`                  | List tasks (with `lastDoneBy` attribution)                 |
+| POST   | `/api/tasks`                  | Create task                                                |
+| POST   | `/api/tasks/:id/complete`     | Mark task done now (attributed to caller)                  |
+| DELETE | `/api/tasks/:id`              | Delete task                                                |
+
+## Tests
+
+| Layer                                    | Where                                  | How to run                          |
+| ---------------------------------------- | -------------------------------------- | ----------------------------------- |
+| Backend unit (auth helpers, JWT, hash)   | `backend/test/auth.test.ts`            | `cd backend && npm test`            |
+| Backend integration (full HTTP API + D1) | `backend/test/api.test.ts`             | `cd backend && npm test`            |
+| Android JVM unit (dirtiness, repo)       | `android/app/src/test/.../data/`       | `cd android && gradle :app:testDebugUnitTest` |
+| Android Compose UI (Robolectric)         | `android/app/src/test/.../ui/`         | same as above                       |
+| Android E2E on emulator (Maestro)        | `.maestro/*.yaml`                      | `maestro test .maestro/`            |
+
+The backend integration tests use `@cloudflare/vitest-pool-workers` — they run against a real Workers runtime + an in-memory D1 with the production migrations applied. No mocks of Cloudflare APIs.
+
+The Compose UI tests use Robolectric so they run on the JVM (no emulator). The Maestro flows are the closest analogue to Playwright for true device-level E2E; they need an emulator and run only on `workflow_dispatch` / schedule, not on every push.
 
 ## Limitations vs. the real Tody app
 
-This is an MVP, not a 1:1 clone. **In:** areas, tasks, frequency-based dirtiness, multi-user household, prioritized list, check-ins. **Out (for now):** Dusty/gamification, plan templates, custom icons, offline-first sync, push reminders, iOS, premium features.
+This is an MVP, not a 1:1 clone. **In:** areas, tasks, frequency-based dirtiness, multi-user household with invites + completion attribution, prioritized list, pull-to-refresh + 15s polling. **Out (for now):** real-time push (WebSockets/SSE), Dusty/gamification, plan templates, custom icons, offline-first conflict resolution, push reminders, iOS, premium features.

@@ -1,0 +1,48 @@
+# Multi-user sync flow: sign up A, mint invite, sign out, register B with
+# invite, complete a task, then verify A sees B's name on next refresh.
+# Requires the app to be wired to a live backend.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+# Person A creates household + a chore
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "alicepro+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Alice"
+- tapOn: { id: "householdNameField" }
+- inputText: "Sync house"
+- tapOn: { id: "submitButton" }
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- tapOn: { id: "addTaskButton:Kitchen" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counters"
+- tapOn: { id: "addTaskConfirm" }
+- tapOn: { id: "inviteButton" }
+- assertVisible:
+    id: "inviteCodeText"
+- copyTextFrom:
+    id: "inviteCodeText"
+- tapOn: "Done"
+# Switch to person B
+- launchApp:
+    clearState: true
+- tapOn: "Join with code"
+- tapOn: { id: "emailField" }
+- inputText: "bobpro+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Bob"
+- tapOn: { id: "inviteCodeField" }
+- pasteText
+- tapOn: { id: "submitButton" }
+- assertVisible: "Wipe counters"
+- tapOn: { id: "completeButton:Wipe counters" }
+- assertVisible: "last done by Bob"

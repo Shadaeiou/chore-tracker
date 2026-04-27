@@ -117,3 +117,9 @@ export async function verifyJwt(
 export function newId(): string {
   return crypto.randomUUID();
 }
+
+/** Short, URL-safe invite code (96 bits → 16 base64url chars). */
+export function newInviteCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return bytesToBase64Url(bytes);
+}

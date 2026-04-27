@@ -21,6 +21,12 @@ interface ChoreApi {
     @POST("auth/login")
     suspend fun login(@Body req: LoginRequest): AuthResponse
 
+    @GET("api/household")
+    suspend fun household(): HouseholdResponse
+
+    @POST("api/invites")
+    suspend fun createInvite(): Invite
+
     @GET("api/areas")
     suspend fun areas(): List<Area>
 
@@ -46,7 +52,7 @@ interface ChoreApi {
 object ApiFactory {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun create(session: Session): ChoreApi {
+    fun create(session: Session, baseUrl: String = BuildConfig.API_BASE_URL): ChoreApi {
         val auth = okhttp3.Interceptor { chain ->
             val token = runBlocking { session.token() }
             val req = if (token != null) {
@@ -63,7 +69,7 @@ object ApiFactory {
             )
             .build()
         return Retrofit.Builder()
-            .baseUrl(BuildConfig.API_BASE_URL)
+            .baseUrl(baseUrl)
             .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()

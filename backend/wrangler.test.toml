@@ -1,0 +1,12 @@
+# Test-only wrangler config used by vitest-pool-workers. Uses an in-memory
+# D1 (no real database id needed) and the same migrations as production.
+name = "chore-tracker-api-test"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "chore_tracker_test"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

@@ -1,0 +1,43 @@
+# End-to-end flow exercising the real APK against a real backend.
+# Run locally with: maestro test .maestro/sign_up_and_add_chore.yaml
+# Requires: emulator running and the app installed pointing at a live API.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn:
+    id: "emailField"
+- inputText: "alice+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn:
+    id: "passwordField"
+- inputText: "longenoughpass"
+- tapOn:
+    id: "displayNameField"
+- inputText: "Alice"
+- tapOn:
+    id: "householdNameField"
+- inputText: "E2E house"
+- tapOn:
+    id: "submitButton"
+- assertVisible: "Tap + to add your first area"
+- tapOn:
+    id: "addAreaFab"
+- tapOn:
+    id: "textDialogField"
+- inputText: "Bathroom"
+- tapOn:
+    id: "textDialogConfirm"
+- assertVisible: "Bathroom"
+- tapOn:
+    id: "addTaskButton:Bathroom"
+- tapOn:
+    id: "taskNameField"
+- inputText: "Scrub tub"
+- tapOn:
+    id: "addTaskConfirm"
+- assertVisible: "Scrub tub"
+- tapOn:
+    id: "completeButton:Scrub tub"
+- assertVisible: "last done by Alice"
