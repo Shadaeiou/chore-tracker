@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -21,17 +22,24 @@ class PushService : FirebaseMessagingService() {
     private val repo get() = (applicationContext as ChoreApp).repo
 
     override fun onNewToken(token: String) {
+        Log.d("PushService", "onNewToken: token received (length ${token.length})")
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             repo.session.setFcmToken(token)
-            // Register immediately if already logged in; otherwise login flow will flush it.
             if (repo.session.token() != null) {
-                try { repo.api.registerDeviceToken(DeviceTokenRequest(token)) }
-                catch (_: Throwable) {}
+                try {
+                    repo.api.registerDeviceToken(DeviceTokenRequest(token))
+                    Log.d("PushService", "onNewToken: registered with backend OK")
+                } catch (t: Throwable) {
+                    Log.w("PushService", "onNewToken: backend registration failed: ${t.message}")
+                }
+            } else {
+                Log.d("PushService", "onNewToken: not logged in yet, queued for login")
             }
         }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
+        Log.d("PushService", "onMessageReceived: title=${message.notification?.title}")
         val isForegrounded = ProcessLifecycleOwner.get().lifecycle.currentState
             .isAtLeast(Lifecycle.State.STARTED)
 
