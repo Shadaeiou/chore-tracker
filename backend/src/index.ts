@@ -235,6 +235,30 @@ app.post("/api/areas", async (c) => {
   });
 });
 
+app.patch("/api/areas/:id", async (c) => {
+  const { hh } = c.get("user");
+  const id = c.req.param("id");
+  const body = await c.req.json<{ name?: string; icon?: string; sortOrder?: number }>();
+
+  const area = await c.env.DB.prepare(
+    "SELECT id FROM areas WHERE id = ? AND household_id = ?",
+  ).bind(id, hh).first();
+  if (!area) throw new HTTPException(404);
+
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if (body.name !== undefined) { sets.push("name = ?"); bindings.push(body.name); }
+  if ("icon" in body) { sets.push("icon = ?"); bindings.push(body.icon ?? null); }
+  if (body.sortOrder !== undefined) { sets.push("sort_order = ?"); bindings.push(body.sortOrder); }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+
+  bindings.push(id);
+  await c.env.DB.prepare(
+    `UPDATE areas SET ${sets.join(", ")} WHERE id = ?`,
+  ).bind(...bindings).run();
+  return c.json({ ok: true });
+});
+
 app.delete("/api/areas/:id", async (c) => {
   const { hh } = c.get("user");
   const id = c.req.param("id");

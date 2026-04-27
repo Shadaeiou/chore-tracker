@@ -462,6 +462,56 @@ describe("undo task completion", () => {
   });
 });
 
+describe("PATCH /api/areas/:id", () => {
+  async function seedArea(): Promise<{ token: string; areaId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    return { token: auth.token, areaId: area.id };
+  }
+
+  it("updates area name", async () => {
+    const { token, areaId } = await seedArea();
+    const res = await api(`/api/areas/${areaId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ name: "Bathroom" }),
+    });
+    expect(res.status).toBe(200);
+    const areas = (await (await api("/api/areas", { token })).json()) as Array<{ id: string; name: string }>;
+    expect(areas.find((a) => a.id === areaId)?.name).toBe("Bathroom");
+  });
+
+  it("rejects patching another household's area", async () => {
+    const { areaId } = await seedArea();
+    const bob = await register();
+    const res = await api(`/api/areas/${areaId}`, {
+      method: "PATCH", token: bob.token,
+      body: JSON.stringify({ name: "Hijack" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for unknown area", async () => {
+    const auth = await register();
+    const res = await api("/api/areas/00000000-0000-0000-0000-000000000000", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ name: "Ghost" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects empty patch body", async () => {
+    const { token, areaId } = await seedArea();
+    const res = await api(`/api/areas/${areaId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("cross-household delete guards", () => {
   it("rejects deleting another household's area", async () => {
     const alice = await register();

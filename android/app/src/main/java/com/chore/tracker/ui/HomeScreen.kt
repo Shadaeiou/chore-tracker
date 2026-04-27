@@ -1,6 +1,13 @@
 package com.chore.tracker.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +29,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -47,17 +55,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -70,19 +70,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.core.content.ContextCompat
-import com.google.firebase.ktx.Firebase
-import com.google.firebase.messaging.ktx.messaging
-import kotlinx.coroutines.tasks.await
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.CreateAreaRequest
 import com.chore.tracker.data.CreateTaskRequest
+import com.chore.tracker.data.DeviceTokenRequest
 import com.chore.tracker.data.Member
+import com.chore.tracker.data.PatchAreaRequest
+import com.chore.tracker.data.PatchTaskRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.dirtiness
+import com.google.firebase.ktx.Firebase
+import com.google.firebase.messaging.ktx.messaging
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,13 +103,15 @@ fun HomeScreen(
     val state by repo.state.collectAsState()
     var showAddArea by remember { mutableStateOf(false) }
     var showAddTaskFor by remember { mutableStateOf<Area?>(null) }
+    var editingArea by remember { mutableStateOf<Area?>(null) }
+    var deletingArea by remember { mutableStateOf<Area?>(null) }
+    var editingTask by remember { mutableStateOf<Task?>(null) }
+    var deletingTask by remember { mutableStateOf<Task?>(null) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Pause polling when the app is backgrounded, resume when foregrounded.
-    // DisposableEffect alone doesn't fire on background — it only fires on disposal.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -117,23 +125,19 @@ fun HomeScreen(
         onDispose { lifecycle.removeObserver(observer); repo.stopPolling() }
     }
 
-    // Request POST_NOTIFICATIONS permission and register FCM token on first composition.
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { /* granted or denied — FCM delivery handled by OS regardless of banner permission */ }
+    ) {}
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
             ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        // Always register the current FCM token on every home screen entry.
-        // onNewToken only fires for new/rotated tokens; for existing tokens we must
-        // explicitly fetch and register here.
         try {
             val token = Firebase.messaging.token.await()
             repo.session.setFcmToken(token)
-            repo.api.registerDeviceToken(com.chore.tracker.data.DeviceTokenRequest(token))
+            repo.api.registerDeviceToken(DeviceTokenRequest(token))
         } catch (_: Throwable) {}
     }
 
@@ -221,6 +225,10 @@ fun HomeScreen(
                                         area = area,
                                         tasks = state.tasks.filter { it.areaId == area.id },
                                         onAddTask = { showAddTaskFor = area },
+                                        onEditArea = { editingArea = area },
+                                        onDeleteArea = { deletingArea = area },
+                                        onEditTask = { task -> editingTask = task },
+                                        onDeleteTask = { task -> deletingTask = task },
                                         onComplete = { task ->
                                             scope.launch {
                                                 runCatching { repo.api.completeTask(task.id) }
@@ -254,10 +262,12 @@ fun HomeScreen(
         }
     }
 
+    // ── Add area ──────────────────────────────────────────────────────────────
     if (showAddArea) {
         TextDialog(
             title = "New area",
             label = "e.g. Kitchen",
+            initialValue = "",
             onDismiss = { showAddArea = false },
             onConfirm = { name ->
                 showAddArea = false
@@ -270,9 +280,53 @@ fun HomeScreen(
         )
     }
 
+    // ── Edit area ─────────────────────────────────────────────────────────────
+    editingArea?.let { area ->
+        TextDialog(
+            title = "Rename area",
+            label = "Area name",
+            initialValue = area.name,
+            confirmLabel = "Save",
+            onDismiss = { editingArea = null },
+            onConfirm = { name ->
+                editingArea = null
+                scope.launch {
+                    runCatching { repo.api.patchArea(area.id, PatchAreaRequest(name = name)) }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to rename area: ${it.message}") }
+                }
+            },
+        )
+    }
+
+    // ── Delete area ───────────────────────────────────────────────────────────
+    deletingArea?.let { area ->
+        AlertDialog(
+            modifier = Modifier.testTag("deleteAreaDialog:${area.name}"),
+            onDismissRequest = { deletingArea = null },
+            title = { Text("Delete ${area.name}?") },
+            text = { Text("This will also delete all tasks in this area. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("deleteAreaConfirm"),
+                    onClick = {
+                        deletingArea = null
+                        scope.launch {
+                            runCatching { repo.api.deleteArea(area.id) }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Failed to delete area: ${it.message}") }
+                        }
+                    },
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deletingArea = null }) { Text("Cancel") } },
+        )
+    }
+
+    // ── Add task ──────────────────────────────────────────────────────────────
     showAddTaskFor?.let { area ->
-        AddTaskDialog(
-            areaName = area.name,
+        TaskFormDialog(
+            title = "New task in ${area.name}",
             members = state.members,
             onDismiss = { showAddTaskFor = null },
             onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
@@ -297,6 +351,61 @@ fun HomeScreen(
         )
     }
 
+    // ── Edit task ─────────────────────────────────────────────────────────────
+    editingTask?.let { task ->
+        TaskFormDialog(
+            title = "Edit task",
+            initialTask = task,
+            members = state.members,
+            confirmLabel = "Save",
+            onDismiss = { editingTask = null },
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
+                editingTask = null
+                scope.launch {
+                    runCatching {
+                        repo.api.patchTask(
+                            task.id,
+                            PatchTaskRequest(
+                                name = name,
+                                frequencyDays = freq,
+                                assignedTo = assignedTo,
+                                autoRotate = autoRotate,
+                                effortPoints = effortPoints,
+                            ),
+                        )
+                    }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to update task: ${it.message}") }
+                }
+            },
+        )
+    }
+
+    // ── Delete task ───────────────────────────────────────────────────────────
+    deletingTask?.let { task ->
+        AlertDialog(
+            modifier = Modifier.testTag("deleteTaskDialog:${task.name}"),
+            onDismissRequest = { deletingTask = null },
+            title = { Text("Delete ${task.name}?") },
+            text = { Text("This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("deleteTaskConfirm"),
+                    onClick = {
+                        deletingTask = null
+                        scope.launch {
+                            runCatching { repo.api.deleteTask(task.id) }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
+                        }
+                    },
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deletingTask = null }) { Text("Cancel") } },
+        )
+    }
+
+    // ── Invite code ───────────────────────────────────────────────────────────
     inviteCode?.let { code ->
         AlertDialog(
             modifier = Modifier.testTag("inviteDialog"),
@@ -314,39 +423,84 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AreaCard(
     area: Area,
     tasks: List<Task>,
     onAddTask: () -> Unit,
+    onEditArea: () -> Unit,
+    onDeleteArea: () -> Unit,
+    onEditTask: (Task) -> Unit,
+    onDeleteTask: (Task) -> Unit,
     onComplete: (Task) -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Card(modifier = Modifier.fillMaxWidth().testTag("areaCard:${area.name}")) {
         Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    area.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    modifier = Modifier.testTag("addTaskButton:${area.name}"),
-                    onClick = onAddTask,
-                ) { Icon(Icons.Default.Add, contentDescription = "Add task") }
+            Box {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { menuExpanded = true },
+                        )
+                        .testTag("areaHeader:${area.name}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        area.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        modifier = Modifier.testTag("addTaskButton:${area.name}"),
+                        onClick = onAddTask,
+                    ) { Icon(Icons.Default.Add, contentDescription = "Add task") }
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.testTag("areaMenu:${area.name}"),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = { menuExpanded = false; onEditArea() },
+                        modifier = Modifier.testTag("areaMenuEdit:${area.name}"),
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete area", color = MaterialTheme.colorScheme.error) },
+                        onClick = { menuExpanded = false; onDeleteArea() },
+                        modifier = Modifier.testTag("areaMenuDelete:${area.name}"),
+                    )
+                }
             }
             if (tasks.isEmpty()) {
                 Text("No tasks yet", style = MaterialTheme.typography.bodySmall)
             } else {
                 tasks.sortedByDescending { it.dirtiness() }.forEach { task ->
-                    TaskRow(task, onComplete = { onComplete(task) })
+                    TaskRow(
+                        task = task,
+                        onComplete = { onComplete(task) },
+                        onEdit = { onEditTask(task) },
+                        onDelete = { onDeleteTask(task) },
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TaskRow(task: Task, onComplete: () -> Unit) {
+private fun TaskRow(
+    task: Task,
+    onComplete: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val ratio = task.dirtiness().toFloat()
     val color = when {
         ratio >= 1.0f -> Color(0xFFD32F2F)
@@ -354,52 +508,79 @@ private fun TaskRow(task: Task, onComplete: () -> Unit) {
         ratio >= 0.33f -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("taskRow:${task.name}"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(task.name, modifier = Modifier.weight(1f))
-                task.assignedToName?.let { name ->
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-                            .testTag("assigneeBadge:${task.name}"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            name.take(1).uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { menuExpanded = true },
+                )
+                .testTag("taskRow:${task.name}"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(task.name, modifier = Modifier.weight(1f))
+                    task.assignedToName?.let { name ->
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                                .testTag("assigneeBadge:${task.name}"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                name.take(1).uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
                     }
                 }
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { ratio.coerceIn(0f, 1f) },
+                    color = color,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val attribution = task.lastDoneBy?.let { "last done by $it" } ?: "never done"
+                Text(
+                    "every ${task.frequencyDays}d · ${(ratio * 100).toInt()}% · $attribution",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
-            Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
-                progress = { ratio.coerceIn(0f, 1f) },
-                color = color,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            val attribution = task.lastDoneBy?.let { "last done by $it" } ?: "never done"
-            Text(
-                "every ${task.frequencyDays}d · ${(ratio * 100).toInt()}% · $attribution",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        IconButton(
-            modifier = Modifier.testTag("completeButton:${task.name}"),
-            onClick = onComplete,
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(color, shape = CircleShape)
-                    .padding(6.dp),
+            IconButton(
+                modifier = Modifier.testTag("completeButton:${task.name}"),
+                onClick = onComplete,
             ) {
-                Icon(Icons.Default.Check, contentDescription = "Done", tint = Color.White)
+                Box(
+                    modifier = Modifier
+                        .background(color, shape = CircleShape)
+                        .padding(6.dp),
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = "Done", tint = Color.White)
+                }
             }
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            modifier = Modifier.testTag("taskMenu:${task.name}"),
+        ) {
+            DropdownMenuItem(
+                text = { Text("Edit") },
+                onClick = { menuExpanded = false; onEdit() },
+                modifier = Modifier.testTag("taskMenuEdit:${task.name}"),
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                onClick = { menuExpanded = false; onDelete() },
+                modifier = Modifier.testTag("taskMenuDelete:${task.name}"),
+            )
         }
     }
 }
@@ -408,10 +589,12 @@ private fun TaskRow(task: Task, onComplete: () -> Unit) {
 private fun TextDialog(
     title: String,
     label: String,
+    initialValue: String = "",
+    confirmLabel: String = "Add",
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var value by remember { mutableStateOf("") }
+    var value by remember(initialValue) { mutableStateOf(initialValue) }
     AlertDialog(
         modifier = Modifier.testTag("textDialog"),
         onDismissRequest = onDismiss,
@@ -429,7 +612,7 @@ private fun TextDialog(
                 enabled = value.isNotBlank(),
                 modifier = Modifier.testTag("textDialogConfirm"),
                 onClick = { onConfirm(value.trim()) },
-            ) { Text("Add") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -437,23 +620,29 @@ private fun TextDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddTaskDialog(
-    areaName: String,
+private fun TaskFormDialog(
+    title: String,
     members: List<Member>,
+    initialTask: Task? = null,
+    confirmLabel: String = "Add",
     onDismiss: () -> Unit,
     onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var freq by remember { mutableStateOf("7") }
-    var selectedMember by remember { mutableStateOf<Member?>(members.firstOrNull()) }
-    var autoRotate by remember { mutableStateOf(false) }
-    var effortPoints by remember { mutableFloatStateOf(1f) }
+    var name by remember { mutableStateOf(initialTask?.name ?: "") }
+    var freq by remember { mutableStateOf(initialTask?.frequencyDays?.toString() ?: "7") }
+    val initialMember = initialTask?.assignedTo?.let { id -> members.firstOrNull { it.id == id } }
+        ?: members.firstOrNull()
+    var selectedMember by remember { mutableStateOf<Member?>(initialMember) }
+    var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
+    var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
     var assigneeExpanded by remember { mutableStateOf(false) }
 
+    val testDialogTag = if (initialTask == null) "addTaskDialog" else "editTaskDialog"
+
     AlertDialog(
-        modifier = Modifier.testTag("addTaskDialog"),
+        modifier = Modifier.testTag(testDialogTag),
         onDismissRequest = onDismiss,
-        title = { Text("New task in $areaName") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -539,7 +728,7 @@ private fun AddTaskDialog(
                         effortPoints.roundToInt(),
                     )
                 },
-            ) { Text("Add") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

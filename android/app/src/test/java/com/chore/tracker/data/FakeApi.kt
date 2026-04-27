@@ -35,6 +35,10 @@ class FakeApi : ChoreApi {
         val a = Area(id = "a-${areas.size + 1}", name = req.name, sortOrder = req.sortOrder, createdAt = 0)
         areas.add(a); createdAreas.add(req); return a
     }
+    override suspend fun patchArea(id: String, req: PatchAreaRequest) {
+        maybeThrow()
+        areas.replaceAll { a -> if (a.id != id) a else a.copy(name = req.name ?: a.name) }
+    }
     override suspend fun deleteArea(id: String) { maybeThrow(); areas.removeAll { it.id == id } }
     override suspend fun tasks(): List<Task> { maybeThrow(); return tasks.toList() }
     override suspend fun createTask(req: CreateTaskRequest): Task {

@@ -59,6 +59,9 @@ data class CreateTaskRequest(
 )
 
 @Serializable
+data class PatchAreaRequest(val name: String? = null, val icon: String? = null)
+
+@Serializable
 data class PatchTaskRequest(
     val name: String? = null,
     val frequencyDays: Int? = null,

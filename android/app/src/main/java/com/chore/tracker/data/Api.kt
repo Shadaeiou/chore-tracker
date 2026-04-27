@@ -35,6 +35,9 @@ interface ChoreApi {
     @POST("api/areas")
     suspend fun createArea(@Body req: CreateAreaRequest): Area
 
+    @PATCH("api/areas/{id}")
+    suspend fun patchArea(@Path("id") id: String, @Body req: PatchAreaRequest)
+
     @DELETE("api/areas/{id}")
     suspend fun deleteArea(@Path("id") id: String)
 

@@ -1,0 +1,87 @@
+# Phase 2b acceptance: edit and delete tasks and areas via long-press menus.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase2b+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase2bTester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase2b home"
+- tapOn: { id: "submitButton" }
+- assertVisible: "Tap + to add your first area"
+- takeScreenshot: phase2b_01_signed_in
+
+# Create area and task
+- tapOn: { id: "addAreaFab" }
+- tapOn: { id: "textDialogField" }
+- inputText: "Kitchen"
+- tapOn: { id: "textDialogConfirm" }
+- assertVisible: "Kitchen"
+- tapOn: { id: "addTaskButton:Kitchen" }
+- tapOn: { id: "taskNameField" }
+- inputText: "Wipe counter"
+- tapOn: { id: "addTaskConfirm" }
+- assertVisible: "Wipe counter"
+- takeScreenshot: phase2b_02_area_and_task_created
+
+# Long-press task → Edit → rename
+- longPressOn: { id: "taskRow:Wipe counter" }
+- assertVisible: { id: "taskMenu:Wipe counter" }
+- tapOn: { id: "taskMenuEdit:Wipe counter" }
+- assertVisible: { id: "editTaskDialog" }
+- clearText:
+    id: "taskNameField"
+- tapOn: { id: "taskNameField" }
+- inputText: "Scrub sink"
+- tapOn: { id: "addTaskConfirm" }
+- extendedWaitUntil:
+    visible: "Scrub sink"
+    timeout: 5000
+- assertNotVisible: "Wipe counter"
+- takeScreenshot: phase2b_03_task_renamed
+
+# Long-press task → Delete → confirm
+- longPressOn: { id: "taskRow:Scrub sink" }
+- assertVisible: { id: "taskMenu:Scrub sink" }
+- tapOn: { id: "taskMenuDelete:Scrub sink" }
+- assertVisible: { id: "deleteTaskDialog:Scrub sink" }
+- assertVisible: "cannot be undone"
+- tapOn: { id: "deleteTaskConfirm" }
+- extendedWaitUntil:
+    visible: "No tasks yet"
+    timeout: 5000
+- takeScreenshot: phase2b_04_task_deleted
+
+# Long-press area → Rename
+- longPressOn: { id: "areaHeader:Kitchen" }
+- assertVisible: { id: "areaMenu:Kitchen" }
+- tapOn: { id: "areaMenuEdit:Kitchen" }
+- assertVisible: { id: "textDialog" }
+- clearText:
+    id: "textDialogField"
+- tapOn: { id: "textDialogField" }
+- inputText: "Bathroom"
+- tapOn: { id: "textDialogConfirm" }
+- extendedWaitUntil:
+    visible: "Bathroom"
+    timeout: 5000
+- assertNotVisible: "Kitchen"
+- takeScreenshot: phase2b_05_area_renamed
+
+# Long-press area → Delete (with cascade warning)
+- longPressOn: { id: "areaHeader:Bathroom" }
+- assertVisible: { id: "areaMenu:Bathroom" }
+- tapOn: { id: "areaMenuDelete:Bathroom" }
+- assertVisible: { id: "deleteAreaDialog:Bathroom" }
+- assertVisible: "also delete all tasks"
+- tapOn: { id: "deleteAreaConfirm" }
+- extendedWaitUntil:
+    visible: "Tap + to add your first area"
+    timeout: 5000
+- takeScreenshot: phase2b_06_area_deleted

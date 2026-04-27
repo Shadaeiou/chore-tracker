@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.ActivityEntry
 import com.chore.tracker.data.FakeApi
@@ -198,6 +201,92 @@ class HomeScreenTest {
         compose.onNodeWithTag("workloadCard").assertIsDisplayed()
         compose.onNodeWithTag("workloadName:Alice").assertIsDisplayed()
         compose.onNodeWithTag("workloadName:Bob").assertIsDisplayed()
+    }
+
+    @Test fun `long press task row shows context menu with edit and delete`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskMenu:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskMenuEdit:Mop floor").assertIsDisplayed()
+        compose.onNodeWithTag("taskMenuDelete:Mop floor").assertIsDisplayed()
+    }
+
+    @Test fun `long press task and tap delete shows confirmation dialog`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskMenuDelete:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskMenuDelete:Mop floor").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("deleteTaskDialog:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("deleteTaskConfirm").performClick()
+        compose.waitUntil(2_000) { fake.tasks.isEmpty() }
+        assertThat(fake.tasks).isEmpty()
+    }
+
+    @Test fun `long press area header shows context menu with rename and delete`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("areaHeader:Kitchen").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("areaMenu:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("areaMenuEdit:Kitchen").assertIsDisplayed()
+        compose.onNodeWithTag("areaMenuDelete:Kitchen").assertIsDisplayed()
+    }
+
+    @Test fun `long press area and tap delete shows cascade warning and calls api`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("areaHeader:Kitchen").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("areaMenuDelete:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("areaMenuDelete:Kitchen").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("deleteAreaDialog:Kitchen").fetchSemanticsNodes().isNotEmpty()
+        }
+        // Cascade warning text must be visible
+        compose.onNodeWithText("also delete all tasks", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("deleteAreaConfirm").performClick()
+        compose.waitUntil(2_000) { fake.areas.isEmpty() }
+        assertThat(fake.areas).isEmpty()
     }
 
     @Test fun `add task dialog shows effort slider and assignee picker when members present`() {
