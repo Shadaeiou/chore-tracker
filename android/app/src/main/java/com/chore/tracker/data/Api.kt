@@ -73,7 +73,7 @@ interface ChoreApi {
 }
 
 object ApiFactory {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     fun create(session: Session, baseUrl: String = BuildConfig.API_BASE_URL): ChoreApi {
         val auth = okhttp3.Interceptor { chain ->
