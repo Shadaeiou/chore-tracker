@@ -1,0 +1,72 @@
+package com.chore.tracker.data
+
+import com.chore.tracker.BuildConfig
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Path
+
+interface ChoreApi {
+    @POST("auth/register")
+    suspend fun register(@Body req: RegisterRequest): AuthResponse
+
+    @POST("auth/login")
+    suspend fun login(@Body req: LoginRequest): AuthResponse
+
+    @GET("api/areas")
+    suspend fun areas(): List<Area>
+
+    @POST("api/areas")
+    suspend fun createArea(@Body req: CreateAreaRequest): Area
+
+    @DELETE("api/areas/{id}")
+    suspend fun deleteArea(@Path("id") id: String)
+
+    @GET("api/tasks")
+    suspend fun tasks(): List<Task>
+
+    @POST("api/tasks")
+    suspend fun createTask(@Body req: CreateTaskRequest): Task
+
+    @POST("api/tasks/{id}/complete")
+    suspend fun completeTask(@Path("id") id: String)
+
+    @DELETE("api/tasks/{id}")
+    suspend fun deleteTask(@Path("id") id: String)
+}
+
+object ApiFactory {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun create(session: Session): ChoreApi {
+        val auth = okhttp3.Interceptor { chain ->
+            val token = runBlocking { session.token() }
+            val req = if (token != null) {
+                chain.request().newBuilder()
+                    .header("Authorization", "Bearer $token")
+                    .build()
+            } else chain.request()
+            chain.proceed(req)
+        }
+        val client = OkHttpClient.Builder()
+            .addInterceptor(auth)
+            .addInterceptor(
+                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC },
+            )
+            .build()
+        return Retrofit.Builder()
+            .baseUrl(BuildConfig.API_BASE_URL)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(ChoreApi::class.java)
+    }
+}

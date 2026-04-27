@@ -1,0 +1,16 @@
+name = "chore-tracker-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Replace database_id with the value printed by `wrangler d1 create chore_tracker`.
+[[d1_databases]]
+binding = "DB"
+database_name = "chore_tracker"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# JWT signing secret. Set with: wrangler secret put JWT_SECRET
+# Local dev: create a .dev.vars file with JWT_SECRET="some-long-random-string"
+[vars]
+ENVIRONMENT = "production"
