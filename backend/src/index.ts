@@ -488,63 +488,6 @@ app.delete("/api/device-tokens/:token", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- Debug (remove after FCM is confirmed working) ----------
-
-app.get("/api/debug/fcm", async (c) => {
-  const { sub, hh } = c.get("user");
-  if (!c.env.FCM_SERVICE_ACCOUNT) return c.json({ error: "FCM_SERVICE_ACCOUNT not set" }, 500);
-
-  const sa = JSON.parse(c.env.FCM_SERVICE_ACCOUNT) as { project_id: string; private_key: string; client_email: string };
-
-  // Step 1: get access token
-  let accessToken: string;
-  let tokenError: string | null = null;
-  try {
-    const { sendToTokens: _, ...rest } = await import("./fcm");
-    // Re-implement token fetch inline so we can surface errors
-    const enc = new TextEncoder();
-    const b64 = (buf: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-    const hdr = b64(enc.encode(JSON.stringify({ alg:"RS256", typ:"JWT" })).buffer as ArrayBuffer);
-    const now = Math.floor(Date.now()/1000);
-    const pay = b64(enc.encode(JSON.stringify({ iss: sa.client_email, scope:"https://www.googleapis.com/auth/firebase.messaging", aud:"https://oauth2.googleapis.com/token", iat:now, exp:now+3600 })).buffer as ArrayBuffer);
-    const pem = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----/,"").replace(/-----END PRIVATE KEY-----/,"").replace(/\s/g,"");
-    const der = (() => { const bin=atob(pem); const bytes=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i); return bytes.buffer; })();
-    const key = await crypto.subtle.importKey("pkcs8", der, { name:"RSASSA-PKCS1-v1_5", hash:"SHA-256" }, false, ["sign"]);
-    const sig = b64(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(`${hdr}.${pay}`)));
-    const jwt = `${hdr}.${pay}.${sig}`;
-    // Use a raw string body to avoid any URLSearchParams encoding quirks in Workers.
-    const reqBody = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
-    const tr = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: reqBody,
-    });
-    const td = await tr.json<{ access_token?: string; error?: string; error_description?: string }>();
-    if (!td.access_token) return c.json({ step:"token_exchange", status: tr.status, error: td.error, description: td.error_description, jwt_prefix: jwt.slice(0,40), body_prefix: reqBody.slice(0,80) });
-    accessToken = td.access_token;
-  } catch(e: unknown) {
-    return c.json({ step:"jwt_build", error: String(e) });
-  }
-
-  // Step 2: fetch my device tokens
-  const { results: tokens } = await c.env.DB.prepare(
-    "SELECT token FROM device_tokens WHERE user_id = ?"
-  ).bind(sub).all<{ token: string }>();
-
-  if (tokens.length === 0) return c.json({ step:"tokens", error:"no device tokens for this user" });
-
-  // Step 3: send to first token
-  const token = tokens[0].token;
-  const url = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
-  const fr = await fetch(url, {
-    method:"POST",
-    headers:{ authorization:`Bearer ${accessToken}`, "content-type":"application/json" },
-    body: JSON.stringify({ message:{ token, notification:{ title:"FCM debug test", body:"If you see this, FCM works!" }, android:{ notification:{ channel_id:"chore_updates" } } } }),
-  });
-  const fd = await fr.json();
-  return c.json({ step:"fcm_send", status: fr.status, token_prefix: token.slice(0,20), response: fd });
-});
-
 // ---------- Activity feed ----------
 
 app.get("/api/activity", async (c) => {
