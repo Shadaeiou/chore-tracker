@@ -145,7 +145,7 @@ Tody's "Pause is the #1 abandonment cause" insight. Plus retroactive completion 
 
 ---
 
-## Phase 5 — Task library + onboarding wizard  ⏳
+## Phase 5 — Task library + onboarding wizard  ✅ shipped
 
 Cuts setup time. Addresses Tody's #1 user complaint ("setup is heavy").
 

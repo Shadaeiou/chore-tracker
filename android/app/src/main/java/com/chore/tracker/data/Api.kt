@@ -74,6 +74,9 @@ interface ChoreApi {
     @GET("api/household/workload")
     suspend fun workload(): List<WorkloadEntry>
 
+    @GET("api/task-templates")
+    suspend fun taskTemplates(@Query("area") area: String? = null): List<TaskTemplate>
+
     @POST("api/device-tokens")
     suspend fun registerDeviceToken(@Body req: DeviceTokenRequest)
 

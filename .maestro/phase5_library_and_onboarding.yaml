@@ -1,0 +1,48 @@
+# Phase 5 acceptance: onboarding wizard runs after fresh signup, populates
+# areas and tasks from the template library.
+appId: com.chore.tracker
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn: "New household"
+- tapOn: { id: "emailField" }
+- inputText: "phase5+${MAESTRO_RUN_ID:=local}@example.com"
+- tapOn: { id: "passwordField" }
+- inputText: "longenoughpass"
+- tapOn: { id: "displayNameField" }
+- inputText: "Phase5Tester"
+- tapOn: { id: "householdNameField" }
+- inputText: "Phase5 home"
+- tapOn: { id: "submitButton" }
+
+# Wizard should appear automatically because state.areas is empty
+- extendedWaitUntil:
+    visible: { id: "onboardingScreen" }
+    timeout: 5000
+- assertVisible: "Welcome"
+- takeScreenshot: phase5_01_wizard_step1
+
+# Pick Kitchen and Bathroom rooms
+- tapOn: { id: "roomChip:kitchen" }
+- tapOn: { id: "roomChip:bathroom" }
+- takeScreenshot: phase5_02_rooms_picked
+- tapOn: { id: "onboardingNext" }
+
+# Step 2 — section headers visible, default tasks pre-checked
+- extendedWaitUntil:
+    visible: { id: "roomHeader:kitchen" }
+    timeout: 5000
+- assertVisible: { id: "roomHeader:bathroom" }
+- takeScreenshot: phase5_03_wizard_step2
+
+# Finish setup
+- tapOn: { id: "onboardingFinish" }
+- extendedWaitUntil:
+    visible: "Kitchen"
+    timeout: 10000
+- assertVisible: "Bathroom"
+- takeScreenshot: phase5_04_setup_complete
+
+# Verify default tasks landed in Kitchen
+- assertVisible: "Wipe down counters"

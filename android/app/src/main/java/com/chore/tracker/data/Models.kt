@@ -53,11 +53,22 @@ data class Task(
 @Serializable
 data class CreateTaskRequest(
     val areaId: String,
-    val name: String,
-    val frequencyDays: Int,
+    val name: String? = null,
+    val frequencyDays: Int? = null,
     val assignedTo: String? = null,
     val autoRotate: Boolean = false,
-    val effortPoints: Int = 1,
+    val effortPoints: Int? = null,
+    val templateId: String? = null,
+    val lastDoneAt: Long? = null,
+)
+
+@Serializable
+data class TaskTemplate(
+    val id: String,
+    val name: String,
+    val suggestedArea: String,
+    val suggestedFrequencyDays: Int,
+    val suggestedEffort: Int,
 )
 
 @Serializable

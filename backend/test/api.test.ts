@@ -968,6 +968,104 @@ describe("POST /api/tasks/:id/snooze", () => {
   });
 });
 
+describe("GET /api/task-templates", () => {
+  it("returns all templates when no area filter", async () => {
+    const auth = await register();
+    const res = await api("/api/task-templates", { token: auth.token });
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as Array<{ id: string; suggestedArea: string }>;
+    expect(list.length).toBeGreaterThan(50);
+    const areas = new Set(list.map((t) => t.suggestedArea));
+    expect(areas).toContain("kitchen");
+    expect(areas).toContain("bathroom");
+  });
+
+  it("filters by suggested_area", async () => {
+    const auth = await register();
+    const list = (await (await api("/api/task-templates?area=kitchen", { token: auth.token })).json()) as Array<{
+      suggestedArea: string;
+    }>;
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.every((t) => t.suggestedArea === "kitchen")).toBe(true);
+  });
+});
+
+describe("POST /api/tasks with templateId", () => {
+  it("creates a task using template defaults", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+
+    const res = await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, templateId: "tmpl-kitchen-1" }),
+    });
+    expect(res.status).toBe(200);
+    const task = (await res.json()) as {
+      name: string; frequencyDays: number; effortPoints: number;
+    };
+    expect(task.name).toBe("Wipe down counters");
+    expect(task.frequencyDays).toBe(1);
+    expect(task.effortPoints).toBe(1);
+  });
+
+  it("user-provided fields override template", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+
+    const res = await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({
+        areaId: area.id, templateId: "tmpl-kitchen-1",
+        name: "My custom name", frequencyDays: 5,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const task = (await res.json()) as { name: string; frequencyDays: number };
+    expect(task.name).toBe("My custom name");
+    expect(task.frequencyDays).toBe(5);
+  });
+
+  it("rejects unknown templateId", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+
+    const res = await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, templateId: "tmpl-bogus" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts optional lastDoneAt to seed initial state", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+
+    const seedTime = Date.now();
+    const res = await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({
+        areaId: area.id, templateId: "tmpl-kitchen-1",
+        lastDoneAt: seedTime,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const task = (await res.json()) as { lastDoneAt: number | null };
+    expect(task.lastDoneAt).toBe(seedTime);
+  });
+});
+
 describe("retroactive completion (POST /api/tasks/:id/complete with at)", () => {
   async function seedTask(): Promise<{ token: string; taskId: string; createdAt: number }> {
     const auth = await register();

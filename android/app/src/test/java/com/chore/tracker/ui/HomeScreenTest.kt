@@ -60,9 +60,21 @@ class HomeScreenTest {
         compose.onNodeWithText("Tap + to add your first area").assertDoesNotExist()
     }
 
-    @Test fun `empty state prompts user to add area`() {
+    @Test fun `empty state shows onboarding wizard`() {
         val repo = newRepo(FakeApi())
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("onboardingScreen").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test fun `skipping wizard shows the manual empty state`() {
+        val repo = newRepo(FakeApi())
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("onboardingSkip").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("onboardingSkip").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithText("Tap + to add your first area").fetchSemanticsNodes().isNotEmpty()
         }
@@ -72,6 +84,12 @@ class HomeScreenTest {
         val fake = FakeApi()
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        // Skip onboarding wizard to access manual add flow
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("onboardingSkip").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("onboardingSkip").performClick()
 
         // Add area
         compose.onNodeWithTag("addAreaFab").performClick()

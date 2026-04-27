@@ -346,13 +346,32 @@ app.post("/api/tasks", async (c) => {
   const { sub, hh } = c.get("user");
   const body = await c.req.json<{
     areaId: string;
-    name: string;
-    frequencyDays: number;
+    name?: string;
+    frequencyDays?: number;
     assignedTo?: string;
     autoRotate?: boolean;
     effortPoints?: number;
+    templateId?: string;
+    lastDoneAt?: number | null;
   }>();
-  if (!body.areaId || !body.name || !body.frequencyDays || body.frequencyDays <= 0)
+  if (!body.areaId) throw new HTTPException(400, { message: "areaId required" });
+
+  // If templateId is provided, fill in any unspecified fields from the template.
+  if (body.templateId) {
+    const tmpl = await c.env.DB.prepare(
+      "SELECT name, suggested_frequency_days, suggested_effort FROM task_templates WHERE id = ?",
+    ).bind(body.templateId).first<{
+      name: string;
+      suggested_frequency_days: number;
+      suggested_effort: number;
+    }>();
+    if (!tmpl) throw new HTTPException(400, { message: "unknown templateId" });
+    body.name = body.name ?? tmpl.name;
+    body.frequencyDays = body.frequencyDays ?? tmpl.suggested_frequency_days;
+    body.effortPoints = body.effortPoints ?? tmpl.suggested_effort;
+  }
+
+  if (!body.name || !body.frequencyDays || body.frequencyDays <= 0)
     throw new HTTPException(400, { message: "missing fields" });
 
   const area = await c.env.DB.prepare(
@@ -367,11 +386,12 @@ app.post("/api/tasks", async (c) => {
   const effortPoints = body.effortPoints ?? 1;
   const id = newId();
   const now = Date.now();
+  const lastDoneAt = body.lastDoneAt ?? null;
   await c.env.DB.prepare(
     `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, now)
+    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, now)
     .run();
   return c.json({
     id,
@@ -382,10 +402,29 @@ app.post("/api/tasks", async (c) => {
     assignedToName: null,
     autoRotate: body.autoRotate ?? false,
     effortPoints,
-    lastDoneAt: null,
+    lastDoneAt,
     lastDoneBy: null,
     createdAt: now,
   });
+});
+
+app.get("/api/task-templates", async (c) => {
+  const area = c.req.query("area");
+  const query = area
+    ? c.env.DB.prepare(
+        `SELECT id, name, suggested_area AS suggestedArea,
+                suggested_frequency_days AS suggestedFrequencyDays,
+                suggested_effort AS suggestedEffort
+           FROM task_templates WHERE suggested_area = ? ORDER BY id`,
+      ).bind(area)
+    : c.env.DB.prepare(
+        `SELECT id, name, suggested_area AS suggestedArea,
+                suggested_frequency_days AS suggestedFrequencyDays,
+                suggested_effort AS suggestedEffort
+           FROM task_templates ORDER BY suggested_area, id`,
+      );
+  const { results } = await query.all();
+  return c.json(results);
 });
 
 app.post("/api/tasks/:id/complete", async (c) => {

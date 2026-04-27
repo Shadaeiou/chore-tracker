@@ -118,6 +118,7 @@ fun HomeScreen(
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var snoozingTask by remember { mutableStateOf<Task?>(null) }
     var retroactiveTask by remember { mutableStateOf<Task?>(null) }
+    var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
@@ -276,8 +277,16 @@ fun HomeScreen(
                             )
                         }
                         if (state.areas.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Tap + to add your first area")
+                            if (wizardSkipped) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Tap + to add your first area")
+                                }
+                            } else {
+                                OnboardingScreen(
+                                    repo = repo,
+                                    onSkip = { wizardSkipped = true },
+                                    onComplete = { /* refresh already happened in wizard */ },
+                                )
                             }
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {

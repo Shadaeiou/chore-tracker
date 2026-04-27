@@ -47,14 +47,17 @@ class FakeApi : ChoreApi {
     override suspend fun tasks(): List<Task> { maybeThrow(); return tasks.toList() }
     override suspend fun createTask(req: CreateTaskRequest): Task {
         maybeThrow()
+        // Resolve name/freq/effort from template if templateId is set and field is missing.
+        val tmpl = req.templateId?.let { id -> taskTemplatesData.firstOrNull { it.id == id } }
         val t = Task(
             id = "t-${tasks.size + 1}",
             areaId = req.areaId,
-            name = req.name,
-            frequencyDays = req.frequencyDays,
+            name = req.name ?: tmpl?.name ?: "unknown",
+            frequencyDays = req.frequencyDays ?: tmpl?.suggestedFrequencyDays ?: 7,
             assignedTo = req.assignedTo,
             autoRotate = req.autoRotate,
-            effortPoints = req.effortPoints,
+            effortPoints = req.effortPoints ?: tmpl?.suggestedEffort ?: 1,
+            lastDoneAt = req.lastDoneAt,
             createdAt = 0,
         )
         tasks.add(t); createdTasks.add(req); return t
@@ -97,6 +100,12 @@ class FakeApi : ChoreApi {
         maybeThrow(); return activityFeed.toList()
     }
     override suspend fun workload(): List<WorkloadEntry> { maybeThrow(); return workloadData.toList() }
+    var taskTemplatesData: MutableList<TaskTemplate> = mutableListOf()
+    override suspend fun taskTemplates(area: String?): List<TaskTemplate> {
+        maybeThrow()
+        return if (area == null) taskTemplatesData.toList()
+        else taskTemplatesData.filter { it.suggestedArea == area }
+    }
     override suspend fun registerDeviceToken(req: DeviceTokenRequest) { maybeThrow() }
     override suspend fun deleteDeviceToken(token: String) { maybeThrow() }
 }
