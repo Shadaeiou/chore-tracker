@@ -94,7 +94,13 @@ export async function sendToTokens(
           authorization: `Bearer ${accessToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ message: { token, notification: payload } }),
+        body: JSON.stringify({
+          message: {
+            token,
+            notification: payload,
+            android: { notification: { channel_id: "chore_updates" } },
+          },
+        }),
       });
       if (!res.ok) {
         const err = await res.json<{

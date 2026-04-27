@@ -55,6 +55,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -99,9 +102,19 @@ fun HomeScreen(
     val snackbarHost = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    DisposableEffect(repo) {
-        repo.startPolling()
-        onDispose { repo.stopPolling() }
+    // Pause polling when the app is backgrounded, resume when foregrounded.
+    // DisposableEffect alone doesn't fire on background — it only fires on disposal.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> repo.startPolling()
+                Lifecycle.Event.ON_STOP -> repo.stopPolling()
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); repo.stopPolling() }
     }
 
     // Request POST_NOTIFICATIONS permission and register FCM token on first composition.
