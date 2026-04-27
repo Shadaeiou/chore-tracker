@@ -64,7 +64,7 @@ class HomeScreenTest {
         }
     }
 
-    @Test fun `golden path: add area, add task, complete task`() {
+    @Test fun `golden path add area add task complete task`() {
         val fake = FakeApi()
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
