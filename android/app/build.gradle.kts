@@ -14,8 +14,13 @@ android {
         applicationId = "com.chore.tracker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // versionCode auto-increments from git commit count so every push bumps it.
+        val gitCommits = try {
+            val proc = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
+            proc.inputStream.bufferedReader().readLine().trim().toInt()
+        } catch (_: Exception) { 1 }
+        versionCode = gitCommits
+        versionName = "0.1.$gitCommits"
 
         // Override at build time with -PapiBaseUrl=https://your-worker.workers.dev/
         val apiBaseUrl = (project.findProperty("apiBaseUrl") as String?)

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.chore.tracker.BuildConfig
 import com.chore.tracker.data.DeviceTokenRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
@@ -78,8 +79,18 @@ fun SettingsScreen(session: Session, onBack: () -> Unit, repo: Repo? = null) {
                 )
             }
 
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("versionText"),
+            )
+
             if (repo != null) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(16.dp))
                 DebugSection(session = session, repo = repo)
