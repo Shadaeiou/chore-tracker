@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "chore_tracker"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "a37ef031-ce55-4a72-bd2f-cd95aabb3921"
 migrations_dir = "migrations"
 
 # JWT signing secret. Set with: wrangler secret put JWT_SECRET
