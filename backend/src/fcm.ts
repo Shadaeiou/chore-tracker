@@ -61,9 +61,9 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
   );
   const jwt = `${header}.${claims}.${sig}`;
 
+  // Do not set Content-Type manually — fetch infers it from URLSearchParams body.
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "urn:ietf:params:oauth2:grant-type:jwt-bearer",
       assertion: jwt,

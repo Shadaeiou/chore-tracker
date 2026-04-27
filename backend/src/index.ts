@@ -512,7 +512,7 @@ app.get("/api/debug/fcm", async (c) => {
     const key = await crypto.subtle.importKey("pkcs8", der, { name:"RSASSA-PKCS1-v1_5", hash:"SHA-256" }, false, ["sign"]);
     const sig = b64(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(`${hdr}.${pay}`)));
     const jwt = `${hdr}.${pay}.${sig}`;
-    const tr = await fetch("https://oauth2.googleapis.com/token", { method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"}, body:new URLSearchParams({ grant_type:"urn:ietf:params:oauth2:grant-type:jwt-bearer", assertion:jwt }) });
+    const tr = await fetch("https://oauth2.googleapis.com/token", { method:"POST", body:new URLSearchParams({ grant_type:"urn:ietf:params:oauth2:grant-type:jwt-bearer", assertion:jwt }) });
     const td = await tr.json<{ access_token?: string; error?: string; error_description?: string }>();
     if (!td.access_token) return c.json({ step:"token_exchange", error: td.error, description: td.error_description, jwt_prefix: jwt.slice(0,40) });
     accessToken = td.access_token;
