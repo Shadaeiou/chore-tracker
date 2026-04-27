@@ -1,5 +1,19 @@
-import { SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+// When TEST_BASE_URL is set (local dev against `wrangler dev --local`) we hit
+// the real HTTP server; otherwise we use SELF from cloudflare:test (CI Workers pool).
+const LOCAL_BASE = process.env.TEST_BASE_URL;
+
+// Lazily-resolved SELF so the module can load in plain Node.js when LOCAL_BASE is set.
+let _selfFetch: ((url: string, init?: RequestInit) => Promise<Response>) | undefined;
+async function workerFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (LOCAL_BASE) return fetch(url.replace("https://worker", LOCAL_BASE), init);
+  if (!_selfFetch) {
+    const { SELF } = await import("cloudflare:test");
+    _selfFetch = SELF.fetch.bind(SELF);
+  }
+  return _selfFetch(url, init);
+}
 
 // Helper: hit the worker's fetch handler.
 async function api(
@@ -11,7 +25,7 @@ async function api(
     ...((init.headers as Record<string, string>) ?? {}),
   };
   if (init.token) headers["authorization"] = `Bearer ${init.token}`;
-  return SELF.fetch(`https://worker${path}`, { ...init, headers });
+  return workerFetch(`https://worker${path}`, { ...init, headers });
 }
 
 interface AuthResponse {
