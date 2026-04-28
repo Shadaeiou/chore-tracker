@@ -6,7 +6,15 @@ Bootstrap context for any Claude working on this repo. Read this first, then `do
 
 ## What this is
 
-**Chore Tracker** — a household chore-tracking app cloning the Tody Android app. Frequency-based "dirtiness" indicators, multi-user households, rotation, push notifications. Backend on Cloudflare Workers + D1, Android client in Kotlin/Compose/Retrofit. The user (Burke) and his household are the primary users; eventual Play Store distribution is in scope but not required for early phases.
+**Chore Tracker** — a household chore-tracking app cloning the Tody Android app. Frequency-based "dirtiness" indicators, multi-user households, rotation, push notifications, notes, search, template library. Backend on Cloudflare Workers + D1, Android client in Kotlin/Compose/Retrofit. The user (Burke) and his household are the primary users; eventual Play Store distribution is in scope but not required for early phases.
+
+## Current state (read this for handoff)
+
+Phases 1–5 + an extensive 5b polish pass shipped. **Phase 6 (gamification) is on hold** — user wants more polish first. **Read `docs/ROADMAP.md` "Quick handoff for the next context" section first**; it summarizes everything that's actually built.
+
+App is currently structured around **3 tabs**: Today / Household / Activity. Notes, search, copy area, mass-select, multi-pick from library, vacation mode, snooze, retroactive completion, FCM push notifications all working. ~84 backend tests + ~53 Android tests passing locally. One Compose test (`golden path add area add task complete task`) consistently times out at the final completeButton click — code path verifies on inspection and a similar pre-seeded test passes; investigate if user reports the symptom on real device.
+
+App name + logo deliberately deferred (still "Chore Tracker", no logo). User uses real-device sideload from CI APK builds, no local emulator.
 
 ## Working with the user
 
@@ -105,7 +113,15 @@ make test
 
 ### Test IDs
 - Attach `Modifier.testTag("camelCaseId")` to anything an acceptance flow needs to find. Cheaper than relying on visible text (which moves for copy/i18n).
-- Existing tags (don't break these): `addAreaFab`, `inviteButton`, `settingsButton`, `homeScreen`, `areaCard:<name>`, `addTaskButton:<name>`, `taskRow:<name>`, `completeButton:<name>`, `inviteCodeText`, `inviteDialog`, `textDialogField`, `textDialogConfirm`, `taskNameField`, `taskFreqField`, `addTaskConfirm`, `addTaskDialog`, `snackbarHost`, `themeOption:SYSTEM|LIGHT|DARK`, `settingsBack`, `settingsScreen`, `emailField`, `passwordField`, `displayNameField`, `householdNameField`, `inviteCodeField`, `submitButton`, `authError`, `authScreen`, `homeError`.
+- **Tabs:** `tab:today`, `tab:household`, `tab:activity` (renamed from older `tab:plan` / `tab:areas` / `tab:chores` — those are gone)
+- **Layout:** `addAreaFab` (only on Household tab now), `inviteButton`, `settingsButton`, `vacationButton`, `homeScreen`, `homeError`, `snackbarHost`, `vacationBanner`, `resumeButton`, `householdHeader`, `householdName`, `householdMenu`, `householdMenuRename`, `householdMenuSelectAreas`, `householdSearchField`, `areaSelectionBar`, `massDeleteAreasButton`
+- **Area cards:** `areaCard:<name>`, `areaHeader:<name>`, `areaMenu:<name>`, `areaMenuEdit:<name>`, `areaMenuCopy:<name>`, `areaMenuSelect:<name>`, `areaMenuDelete:<name>`, `addTaskButton:<name>`, `addFromLibraryButton:<name>`, `selectionBar:<name>`, `massDeleteButton:<name>`, `selectableAreaCard:<name>`, `selectableAreaCheckbox:<name>`
+- **Task rows:** `taskRow:<name>`, `completeButton:<name>`, `assigneeBadge:<name>`, `taskNotes:<name>`, `taskMenu:<name>`, `taskMenuEdit:<name>`, `taskMenuSnooze:<name>`, `taskMenuMarkDoneAt:<name>`, `taskMenuCompleteWithNotes:<name>`, `taskMenuDelete:<name>`, `selectableTaskRow:<name>`, `selectableCheckbox:<name>`
+- **Activity rows:** `activityScreen`, `activityRow:<taskName>`, `activityDateHeader:<date>`, `activityNotes:<taskName>`, `activityMenu:<taskName>`, `activityMenuUndo:<taskName>`, `undoCompletionDialog:<taskName>`, `undoCompletionConfirm`
+- **Dialogs:** `addTaskDialog`, `editTaskDialog`, `addAreaDialog`, `taskNameField`, `taskFreqField`, `assigneePicker`, `assigneeOption:<name>`, `autoRotateToggle`, `effortSlider`, `taskNotesField`, `addTaskConfirm`, `browseLibraryButton`, `libraryPicker`, `libraryTemplate:<id>`, `multiLibraryPicker`, `multiTemplate:<id>`, `multiLibraryConfirm`, `textDialog`, `textDialogField`, `textDialogConfirm`, `areaSuggestion:<name>`, `inviteDialog`, `inviteCodeText`, `inviteCopyButton`, `inviteShareButton`, `deleteTaskDialog:<name>`, `deleteTaskConfirm`, `deleteAreaDialog:<name>`, `deleteAreaConfirm`, `snoozeDialog:<name>`, `snoozeOption:<days>`, `retroactiveDialog:<name>`, `retroactiveConfirm`, `completeWithNotesDialog:<name>`, `completionNotesField`, `completeWithNotesConfirm`
+- **Onboarding wizard:** `onboardingScreen`, `onboardingSkip`, `onboardingNext`, `onboardingBack`, `onboardingFinish`, `roomChip:<key>`, `roomHeader:<key>`, `templateRow:<id>`, `templateToggle:<id>`
+- **Auth:** `authScreen`, `emailField`, `passwordField`, `displayNameField`, `householdNameField`, `inviteCodeField`, `submitButton`, `authError`
+- **Settings:** `settingsScreen`, `settingsBack`, `themeOption:SYSTEM|LIGHT|DARK`, `versionText`
 
 ### Auth and scoping
 - Every protected endpoint goes under the `/api/*` Hono middleware (`backend/src/index.ts:154-162`).
@@ -130,11 +146,18 @@ These are not up for renegotiation without explicit user buy-in:
 
 | Decision | Locked to |
 |---|---|
-| Push transport (when we get there in Phase 3) | **FCM via Firebase**, not WebSocket DO or aggressive polling |
+| Push transport | **FCM via Firebase HTTP v1**, not WebSocket DO or aggressive polling |
+| FCM grant type | `urn:ietf:params:oauth:grant-type:jwt-bearer` (no `2` — easy typo, took hours to find) |
 | Rotation model | **Per-task `auto_rotate` flag**, Tody's pattern |
 | Scope target | **Full Tody parity, phased**; graphics/icons/Dusty mascot deferred to Phase 7 |
 | Default branch & flow | `main`-only, push directly, no PR review process |
 | Deploy mechanism | Cloudflare Workers Builds via dashboard. The old `deploy-backend.yml` was deleted. |
+| Tab structure | **Today / Household / Activity** (3 tabs). Today = read-only triage, Household = manage, Activity = history+stats. Don't bring back the old single Chores tab. |
+| New tasks default | `lastDoneAt = now` so indicators start green, not red. Both manual creation and area-copy do this. |
+| `kotlinx.serialization` Json config | **`encodeDefaults = true`** — fields with default values must serialize, otherwise backend validators see missing fields. Don't change this. |
+| Boolean coercion | D1 stores booleans as INTEGER; backend GET handlers must coerce `autoRotate: number` → `autoRotate: boolean` before returning JSON. Tests assert the type, not just truthiness. |
+| Undo path | Snackbar undo for last action, **plus** long-press any activity row → undo any past completion (`DELETE /api/completions/:id`). Don't remove the activity-tab undo. |
+| App name + logo | **Deferred** until user picks one. Don't propose names without explicit ask. |
 
 ## Where to look next
 

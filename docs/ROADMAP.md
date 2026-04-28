@@ -6,6 +6,33 @@ Phased plan to bring Chore Tracker to Tody feature parity. Each phase is a self-
 
 ---
 
+## Quick handoff for the next context
+
+**Where we are:** Phases 1–5 shipped, plus a substantial polish pass (see "Phase 5b polish" below). Phase 6 (gamification) is **on hold** — user explicitly chose to polish before adding leaderboards/Dusty. Phase 7 (mascot art, focus timer, multi-home) untouched.
+
+**Current app shape:**
+- 3 tabs: **Today** (date-based "what's due now"), **Household** (manage areas/tasks, with rename + copy + mass-select + search), **Activity** (history feed + workload card)
+- Vacation mode toggle in top bar (beach icon)
+- Onboarding wizard runs once on first signup
+- 16-room template library covering cleaning + errands + vehicle + personal + financial + plants + family
+- Notes on tasks (persistent) and completions (per-event) with 📝 prefix display
+- Long-press menus on task rows and area headers; long-press Household header for rename / select-areas
+- Auto-incrementing version visible in Settings
+
+**Known issue:** the `golden path add area add task complete task` Compose test (Robolectric) consistently times out at the final completeButton click. The same code path tested with a pre-seeded task passes. Not yet root-caused — functionality verifies on real device. If user reports the symptom (tap complete → no "Marked done" snackbar) on a fresh install, this is the bug.
+
+**Things deferred or punted:**
+- App name + logo: user paused this. Currently still "Chore Tracker" with no logo on auth screen.
+- Phase 6: explicitly on hold per user request.
+- Roborazzi snapshot tests: deferred from Phase 1, never picked back up.
+- Two-emulator Maestro flows for FCM: only single-device flows exist; real two-device test still relies on real-device sideload.
+
+**Testing locally** (per CLAUDE.md):
+- `make backend-test-local` (with `npm run dev:test` running) — ~84 tests, ~3s
+- `make android-test` — ~53 Compose tests, ~10s warm
+
+---
+
 ## Phase 1 — Quick wins (dark theme + undo)  ✅ shipped
 
 Highest ROI, lowest risk. Both items address immediate user pain.
@@ -164,7 +191,74 @@ Cuts setup time. Addresses Tody's #1 user complaint ("setup is heavy").
 
 ---
 
-## Phase 6 — Gamification (placeholder graphics)  ⏳
+## Phase 5b — Polish + UX overhaul  ✅ shipped
+
+After Phase 5 the user did an extensive use-and-feedback pass and we shipped a long polish chain. Lots of small commits — grouped here by theme.
+
+### Tab restructure
+- Was: single Chores tab + Activity tab. New: **Today / Household / Activity**.
+- **Today** filters tasks date-based (`(lastDoneAt + frequencyDays * 24h) <= end-of-today`), hides snoozed tasks, shows nothing during vacation mode.
+- **Household** is the management hub: area cards with kebab menus (Rename / Copy as… / Select tasks… / Delete), `+ Add from library` per area, search bar.
+- **Activity** absorbed the workload card from the old Chores tab.
+- FAB only on Household tab.
+
+### Bulk operations
+- **Multi-select Add Areas** — replaces single-area dialog. 16 chips for canonical rooms (auto-hidden if already added) + custom-name field. "Add N" creates them all in parallel.
+- **Mass-delete tasks** — kebab on area card → "Select tasks…" → checkbox mode + selection bar.
+- **Mass-select areas** — long-press Household header → "Select areas…" → checkbox mode on each area card + selection bar with delete.
+- **Multi-pick from library** — `+ Add from library` opens a multi-select template picker filtered to the area's category (falls back to all when no match).
+
+### CRUD additions
+- **Copy area** — kebab on area card → "Copy as…". Backend `POST /api/areas/:id/copy` clones area + tasks (no completions). Both bug fixes shipped: response now returns full Area shape (Android serialization no longer errors), copied tasks seed `last_done_at = now` (start green, not red).
+- **Rename household** — long-press Household header → "Rename household". Backend `PATCH /api/household` accepts `{name}` alongside `{pausedUntil}` (separate request types on Android to avoid clobbering each other).
+
+### Notes (Migration 0008)
+- **Persistent task notes** (e.g. "use Method, not bleach") — column on `tasks`, editable in TaskFormDialog, displayed inline on TaskRow with 📝 prefix.
+- **Per-completion notes** (e.g. this week's grocery list) — column on `completions`, captured via "Mark done with notes…" in the task long-press menu, displayed under the entry on Activity tab.
+- Backend `PATCH /api/tasks/:id` accepts `notes` (empty clears); `POST /api/tasks/:id/complete` accepts `notes`; GET endpoints return them.
+
+### Activity tab undo
+- Long-press any activity row → "Undo this completion" → confirmation → backend `DELETE /api/completions/:id` recomputes `tasks.last_done_at` via `SELECT MAX(done_at)` of remaining completions. Lets users undo accidents that happened before the snackbar timed out (e.g. previous session, app crash).
+
+### Template library expansion (Migration 0007)
+- Added 46 templates across 6 non-cleaning categories: Errands, Vehicle, Personal/health, Financial, Plants, Family. Original cleaning categories still there. Total ≈126 templates.
+- Onboarding wizard now exposes all 16 categories.
+- Browse-library button in TaskFormDialog opens a single-select picker scoped to current area's category.
+
+### Smaller polish
+- **Manually-created tasks start green** (`lastDoneAt = now` on create), not all-red.
+- **Overdue text wording**: "3 days overdue" instead of "200%".
+- **Search in Household tab** — filter areas + their tasks by name; X to clear.
+- **Add area dialog suggestions** match the wizard's full 16-room list (was a divergent shorter list).
+- **Vacation icon tint** — only set explicit tint when paused (was rendering black on light themes).
+- **CancellationException no longer leaked into homeError** — `Repo.refresh()` now rethrows cancellations cleanly.
+- **Polling lifecycle-aware** — `LifecycleEventObserver` stops polling on ON_STOP (app backgrounded) and resumes on ON_START. Prevents stale "Unable to resolve host" errors when reopening the app.
+- **Auth screen field widths** — email/password/etc. now `fillMaxWidth()` to match the submit button.
+- **Invite code dialog** — now copyable (Copy button → clipboard) and shareable (Share… button fires Intent.ACTION_SEND).
+- **App version in Settings** — `Version 0.1.N (build N)` where N = git commit count. Workflow uses `fetch-depth: 0` so it's a real number, not always 1.
+- **FCM debugging panel** in Settings (visible token + register button) — shipped during the FCM saga, kept around as it's useful.
+
+### Bug fixes worth noting
+- **OAuth2 grant type typo** — was `urn:ietf:params:oauth2:grant-type:jwt-bearer`, should be `urn:ietf:params:oauth:grant-type:jwt-bearer` (no `2` in `oauth`). Caused all FCM messages to silently fail. Fixed by inspecting google-auth-library source.
+- **`autoRotate` returned as integer** — D1 stores booleans as INTEGER. Backend now coerces to JSON boolean (`r.autoRotate !== 0`) before returning. Test that previously asserted `.toBe(1)` rubber-stamped the bug; tightened to `.toBe(true)`.
+- **Device token never registered** — `kotlinx.serialization` skipped `platform: "android"` because it matched the default. Set `encodeDefaults = true` in the Json config.
+- **Tab name typo in tests** — Kotlin 2.0 rejects backtick test names containing `:`. Renamed `golden path: add ...` → `golden path add ...`.
+
+### Backend tests
+- 84 tests covering all the above
+- Local test runner via `wrangler dev --local --port 8788` + `vitest` against HTTP (workerd crashes on Windows directly)
+
+### Tab/Maestro flows updated
+All Phase 1–4 Maestro flows updated to handle:
+- Onboarding wizard appearing on first launch (taps `onboardingSkip`)
+- FAB now only on Household tab (taps `tab:household` before `addAreaFab`)
+- Renamed tab tags (`tab:areas` → `tab:household`)
+
+---
+
+## Phase 6 — Gamification (placeholder graphics)  ⏸ on hold
+
+User explicitly paused this in favor of polish. Original spec preserved below for when we resume.
 
 Functional gamification with placeholder Dusty (gray circle for now). Real art lands in Phase 7.
 
