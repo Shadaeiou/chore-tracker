@@ -903,6 +903,86 @@ describe("device tokens", () => {
   });
 });
 
+describe("notes (persistent task notes + per-completion notes)", () => {
+  async function seedTask(): Promise<{ token: string; areaId: string; taskId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 7 }),
+    })).json()) as { id: string };
+    return { token: auth.token, areaId: area.id, taskId: task.id };
+  }
+
+  it("persistent notes attached to a task survive completion", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ notes: "Use Method, not bleach" }),
+    });
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; notes: string | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.notes).toBe("Use Method, not bleach");
+  });
+
+  it("PATCH with notes='' clears the note", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ notes: "Some text" }),
+    });
+    await api(`/api/tasks/${taskId}`, {
+      method: "PATCH", token,
+      body: JSON.stringify({ notes: "" }),
+    });
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; notes: string | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.notes).toBeNull();
+  });
+
+  it("per-completion notes are recorded and surface in activity", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ notes: "got milk, eggs, bread" }),
+    });
+
+    const activity = (await (await api("/api/activity", { token })).json()) as Array<{
+      taskId: string; notes: string | null;
+    }>;
+    expect(activity[0].taskId).toBe(taskId);
+    expect(activity[0].notes).toBe("got milk, eggs, bread");
+  });
+
+  it("completions without notes have notes=null", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    const activity = (await (await api("/api/activity", { token })).json()) as Array<{
+      notes: string | null;
+    }>;
+    expect(activity[0].notes).toBeNull();
+  });
+
+  it("per-completion notes don't bleed onto the task itself", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}/complete`, {
+      method: "POST", token,
+      body: JSON.stringify({ notes: "weekly run notes" }),
+    });
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; notes: string | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.notes).toBeNull();
+  });
+});
+
 describe("PATCH /api/household (rename)", () => {
   it("updates name", async () => {
     const auth = await register({ householdName: "Old name" });

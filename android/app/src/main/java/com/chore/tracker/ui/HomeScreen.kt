@@ -27,8 +27,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -124,10 +126,12 @@ fun HomeScreen(
     var libraryForArea by remember { mutableStateOf<Area?>(null) }
     var selectAreasMode by remember { mutableStateOf(false) }
     var selectedAreaIds by remember { mutableStateOf(setOf<String>()) }
+    var householdSearchQuery by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var snoozingTask by remember { mutableStateOf<Task?>(null) }
     var retroactiveTask by remember { mutableStateOf<Task?>(null) }
+    var notesCompletionTask by remember { mutableStateOf<Task?>(null) }
     var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
@@ -293,6 +297,7 @@ fun HomeScreen(
                                 onComplete = onCompleteTask,
                                 onEditTask = { editingTask = it },
                                 onDeleteTask = { deletingTask = it },
+                                onCompleteWithNotes = { notesCompletionTask = it },
                                 onSnoozeTask = { snoozingTask = it },
                                 onMarkDoneAt = { retroactiveTask = it },
                             )
@@ -346,8 +351,40 @@ fun HomeScreen(
                                 Text("Tap + to add your first area")
                             }
                         } else {
+                            // Search bar
+                            if (!selectAreasMode) {
+                                OutlinedTextField(
+                                    value = householdSearchQuery,
+                                    onValueChange = { householdSearchQuery = it },
+                                    placeholder = { Text("Search areas and tasks") },
+                                    singleLine = true,
+                                    leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
+                                    trailingIcon = if (householdSearchQuery.isNotEmpty()) {
+                                        @Composable {
+                                            IconButton(onClick = { householdSearchQuery = "" }) {
+                                                Icon(androidx.compose.material.icons.Icons.Default.Clear, "Clear")
+                                            }
+                                        }
+                                    } else null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                        .testTag("householdSearchField"),
+                                )
+                            }
+                            // Filter areas + tasks based on search
+                            val q = householdSearchQuery.trim().lowercase()
+                            val filteredAreas = if (q.isEmpty()) state.areas else state.areas.filter { area ->
+                                area.name.lowercase().contains(q) ||
+                                    state.tasks.any { it.areaId == area.id && it.name.lowercase().contains(q) }
+                            }
+                            if (filteredAreas.isEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("No matches for \"${householdSearchQuery.trim()}\"")
+                                }
+                            } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-                                items(state.areas, key = { it.id }) { area ->
+                                items(filteredAreas, key = { it.id }) { area ->
                                     if (selectAreasMode) {
                                         SelectableAreaCard(
                                             area = area,
@@ -362,9 +399,14 @@ fun HomeScreen(
                                         Spacer(Modifier.height(8.dp))
                                         return@items
                                     }
+                                    val areaTasks = if (q.isEmpty()) state.tasks.filter { it.areaId == area.id }
+                                    else state.tasks.filter {
+                                        it.areaId == area.id &&
+                                            (area.name.lowercase().contains(q) || it.name.lowercase().contains(q))
+                                    }
                                     AreaCard(
                                         area = area,
-                                        tasks = state.tasks.filter { it.areaId == area.id },
+                                        tasks = areaTasks,
                                         onAddTask = { showAddTaskFor = area },
                                         onAddFromLibrary = { libraryForArea = area },
                                         onEditArea = { editingArea = area },
@@ -389,10 +431,12 @@ fun HomeScreen(
                                         },
                                         onSnoozeTask = { task -> snoozingTask = task },
                                         onMarkDoneAt = { task -> retroactiveTask = task },
+                                        onCompleteWithNotes = { task -> notesCompletionTask = task },
                                         onComplete = onCompleteTask,
                                     )
                                     Spacer(Modifier.height(8.dp))
                                 }
+                            }
                             }
                         }
                     }
@@ -568,7 +612,7 @@ fun HomeScreen(
             areaNameForLibrary = area.name,
             repo = repo,
             onDismiss = { showAddTaskFor = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes ->
                 showAddTaskFor = null
                 scope.launch {
                     runCatching {
@@ -580,6 +624,7 @@ fun HomeScreen(
                                 assignedTo = assignedTo,
                                 autoRotate = autoRotate,
                                 effortPoints = effortPoints,
+                                notes = notes,
                                 // Start the indicator green: treat the task as just done.
                                 // Avoids the bad UX where every newly added task immediately
                                 // shows as overdue.
@@ -602,7 +647,7 @@ fun HomeScreen(
             members = state.members,
             confirmLabel = "Save",
             onDismiss = { editingTask = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes ->
                 editingTask = null
                 scope.launch {
                     runCatching {
@@ -614,6 +659,9 @@ fun HomeScreen(
                                 assignedTo = assignedTo,
                                 autoRotate = autoRotate,
                                 effortPoints = effortPoints,
+                                // PATCH treats notes="" as clear; pass empty string so the
+                                // user can clear by emptying the field, vs null = "leave alone".
+                                notes = notes ?: "",
                             ),
                         )
                     }
@@ -674,6 +722,25 @@ fun HomeScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { snoozingTask = null }) { Text("Cancel") } },
+        )
+    }
+
+    // ── Mark done with notes ──────────────────────────────────────────────────
+    notesCompletionTask?.let { task ->
+        CompleteWithNotesDialog(
+            task = task,
+            onDismiss = { notesCompletionTask = null },
+            onConfirm = { notes ->
+                notesCompletionTask = null
+                scope.launch {
+                    runCatching { repo.api.completeTask(task.id, com.chore.tracker.data.CompleteRequest(notes = notes)) }
+                        .onSuccess {
+                            repo.refresh()
+                            snackbarHost.showSnackbar("Marked done")
+                        }
+                        .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
+                }
+            },
         )
     }
 
@@ -951,6 +1018,7 @@ private fun TodayList(
     onDeleteTask: (Task) -> Unit,
     onSnoozeTask: (Task) -> Unit,
     onMarkDoneAt: (Task) -> Unit,
+    onCompleteWithNotes: (Task) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     val startOfTomorrow = remember(now) {
@@ -1001,6 +1069,7 @@ private fun TodayList(
                 onDelete = { onDeleteTask(task) },
                 onSnooze = { onSnoozeTask(task) },
                 onMarkDoneAt = { onMarkDoneAt(task) },
+                onCompleteWithNotes = { onCompleteWithNotes(task) },
             )
         }
     }
@@ -1021,6 +1090,7 @@ private fun AreaCard(
     onMassDeleteTasks: (List<String>) -> Unit,
     onSnoozeTask: (Task) -> Unit,
     onMarkDoneAt: (Task) -> Unit,
+    onCompleteWithNotes: (Task) -> Unit,
     onComplete: (Task) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1136,6 +1206,7 @@ private fun AreaCard(
                             onDelete = { onDeleteTask(task) },
                             onSnooze = { onSnoozeTask(task) },
                             onMarkDoneAt = { onMarkDoneAt(task) },
+                            onCompleteWithNotes = { onCompleteWithNotes(task) },
                         )
                     }
                 }
@@ -1187,6 +1258,7 @@ private fun TaskRow(
     onDelete: () -> Unit,
     onSnooze: () -> Unit,
     onMarkDoneAt: () -> Unit,
+    onCompleteWithNotes: () -> Unit,
     areaName: String? = null,
 ) {
     val ratio = task.dirtiness().toFloat()
@@ -1267,6 +1339,16 @@ private fun TaskRow(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                task.notes?.takeIf { it.isNotBlank() }?.let { n ->
+                    Text(
+                        "📝 $n",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("taskNotes:${task.name}"),
+                    )
+                }
             }
             IconButton(
                 modifier = Modifier.testTag("completeButton:${task.name}"),
@@ -1300,6 +1382,11 @@ private fun TaskRow(
                 text = { Text("Mark done at…") },
                 onClick = { menuExpanded = false; onMarkDoneAt() },
                 modifier = Modifier.testTag("taskMenuMarkDoneAt:${task.name}"),
+            )
+            DropdownMenuItem(
+                text = { Text("Mark done with notes…") },
+                onClick = { menuExpanded = false; onCompleteWithNotes() },
+                modifier = Modifier.testTag("taskMenuCompleteWithNotes:${task.name}"),
             )
             DropdownMenuItem(
                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
@@ -1416,6 +1503,41 @@ private fun AddAreaDialog(
     )
 }
 
+@Composable
+private fun CompleteWithNotesDialog(
+    task: Task,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var notes by remember { mutableStateOf("") }
+    AlertDialog(
+        modifier = Modifier.testTag("completeWithNotesDialog:${task.name}"),
+        onDismissRequest = onDismiss,
+        title = { Text("Mark done with notes") },
+        text = {
+            Column {
+                Text("Notes for this completion of \"${task.name}\":")
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    notes,
+                    { notes = it },
+                    placeholder = { Text("e.g. milk, eggs, bread — got everything except cilantro") },
+                    modifier = Modifier.fillMaxWidth().testTag("completionNotesField"),
+                    minLines = 3,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = notes.isNotBlank(),
+                modifier = Modifier.testTag("completeWithNotesConfirm"),
+                onClick = { onConfirm(notes.trim()) },
+            ) { Text("Mark done") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RetroactiveDoneDialog(
@@ -1457,7 +1579,7 @@ private fun TaskFormDialog(
     areaNameForLibrary: String? = null,
     repo: Repo? = null,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int) -> Unit,
+    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int, notes: String?) -> Unit,
 ) {
     var name by remember { mutableStateOf(initialTask?.name ?: "") }
     var freq by remember { mutableStateOf(initialTask?.frequencyDays?.toString() ?: "7") }
@@ -1466,6 +1588,7 @@ private fun TaskFormDialog(
     var selectedMember by remember { mutableStateOf<Member?>(initialMember) }
     var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
     var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
+    var notes by remember { mutableStateOf(initialTask?.notes ?: "") }
     var assigneeExpanded by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
 
@@ -1551,6 +1674,14 @@ private fun TaskFormDialog(
                         modifier = Modifier.testTag("effortSlider"),
                     )
                 }
+                OutlinedTextField(
+                    notes,
+                    { notes = it },
+                    label = { Text("Notes (optional)") },
+                    placeholder = { Text("e.g. Use Method, not bleach") },
+                    modifier = Modifier.fillMaxWidth().testTag("taskNotesField"),
+                    minLines = 2,
+                )
             }
         },
         confirmButton = {
@@ -1564,6 +1695,7 @@ private fun TaskFormDialog(
                         selectedMember?.id,
                         autoRotate,
                         effortPoints.roundToInt(),
+                        notes.trim().ifBlank { null },
                     )
                 },
             ) { Text(confirmLabel) }

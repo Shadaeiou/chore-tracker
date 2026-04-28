@@ -288,10 +288,11 @@ app.post("/api/areas/:id/copy", async (c) => {
   if (!source) throw new HTTPException(404);
 
   const { results: tasks } = await c.env.DB.prepare(
-    `SELECT name, frequency_days, auto_rotate, effort_points
+    `SELECT name, frequency_days, auto_rotate, effort_points, notes
        FROM tasks WHERE area_id = ?`,
   ).bind(sourceId).all<{
     name: string; frequency_days: number; auto_rotate: number; effort_points: number;
+    notes: string | null;
   }>();
 
   const newAreaId = newId();
@@ -307,9 +308,9 @@ app.post("/api/areas/:id/copy", async (c) => {
     // for manually-created tasks. Avoids the "wall of red" right after copy.
     stmts.push(
       c.env.DB.prepare(
-        `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(newId(), newAreaId, t.name, t.frequency_days, sub, t.auto_rotate, t.effort_points, now, now),
+        `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(newId(), newAreaId, t.name, t.frequency_days, sub, t.auto_rotate, t.effort_points, now, t.notes, now),
     );
   }
   await c.env.DB.batch(stmts);
@@ -356,6 +357,7 @@ app.get("/api/tasks", async (c) => {
             t.auto_rotate    AS autoRotate,
             t.effort_points  AS effortPoints,
             t.snoozed_until  AS snoozedUntil,
+            t.notes          AS notes,
             u.display_name   AS lastDoneBy,
             ua.display_name  AS assignedToName
        FROM tasks t
@@ -408,6 +410,7 @@ app.post("/api/tasks", async (c) => {
     effortPoints?: number;
     templateId?: string;
     lastDoneAt?: number | null;
+    notes?: string | null;
   }>();
   if (!body.areaId) throw new HTTPException(400, { message: "areaId required" });
 
@@ -442,11 +445,12 @@ app.post("/api/tasks", async (c) => {
   const id = newId();
   const now = Date.now();
   const lastDoneAt = body.lastDoneAt ?? null;
+  const notes = body.notes ?? null;
   await c.env.DB.prepare(
-    `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, now)
+    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, notes, now)
     .run();
   return c.json({
     id,
@@ -459,6 +463,7 @@ app.post("/api/tasks", async (c) => {
     effortPoints,
     lastDoneAt,
     lastDoneBy: null,
+    notes,
     createdAt: now,
   });
 });
@@ -485,8 +490,9 @@ app.get("/api/task-templates", async (c) => {
 app.post("/api/tasks/:id/complete", async (c) => {
   const { sub, hh } = c.get("user");
   const taskId = c.req.param("id");
-  // Optional retroactive timestamp; body may be empty for "right now" completion.
-  const body = await c.req.json<{ at?: number }>().catch(() => ({} as { at?: number }));
+  // Optional retroactive timestamp + per-completion notes; body may be empty.
+  const body = await c.req.json<{ at?: number; notes?: string }>()
+    .catch(() => ({} as { at?: number; notes?: string }));
 
   const task = await c.env.DB.prepare(
     `SELECT t.id, t.name, t.auto_rotate, t.assigned_to, t.created_at FROM tasks t
@@ -505,10 +511,12 @@ app.post("/api/tasks/:id/complete", async (c) => {
     completedAt = body.at;
   }
   const completionId = newId();
+  const trimmedNotes = body.notes?.trim();
+  const completionNotes = trimmedNotes ? trimmedNotes : null;
   const stmts: D1PreparedStatement[] = [
     c.env.DB.prepare(
-      "INSERT INTO completions (id, task_id, user_id, done_at) VALUES (?, ?, ?, ?)",
-    ).bind(completionId, taskId, sub, completedAt),
+      "INSERT INTO completions (id, task_id, user_id, done_at, notes) VALUES (?, ?, ?, ?, ?)",
+    ).bind(completionId, taskId, sub, completedAt, completionNotes),
     // last_done_at uses MAX so an older retroactive completion doesn't overwrite a newer one.
     c.env.DB.prepare(
       `UPDATE tasks SET last_done_at = (
@@ -586,6 +594,7 @@ app.patch("/api/tasks/:id", async (c) => {
     assignedTo?: string | null;
     autoRotate?: boolean;
     effortPoints?: number;
+    notes?: string | null;
   }>();
 
   const task = await c.env.DB.prepare(
@@ -605,6 +614,11 @@ app.patch("/api/tasks/:id", async (c) => {
   if ("assignedTo" in body) { sets.push("assigned_to = ?"); bindings.push(body.assignedTo ?? null); }
   if (body.autoRotate !== undefined) { sets.push("auto_rotate = ?"); bindings.push(body.autoRotate ? 1 : 0); }
   if (body.effortPoints !== undefined) { sets.push("effort_points = ?"); bindings.push(body.effortPoints); }
+  if ("notes" in body) {
+    const trimmed = body.notes?.trim();
+    sets.push("notes = ?");
+    bindings.push(trimmed ? trimmed : null);
+  }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
 
   bindings.push(id);
@@ -687,7 +701,8 @@ app.get("/api/activity", async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT c.id, c.task_id AS taskId, t.name AS taskName,
-            a.name AS areaName, u.display_name AS doneBy, c.done_at AS doneAt
+            a.name AS areaName, u.display_name AS doneBy, c.done_at AS doneAt,
+            c.notes AS notes
        FROM completions c
        JOIN tasks t ON t.id = c.task_id
        JOIN areas a ON a.id = t.area_id

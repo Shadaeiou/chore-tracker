@@ -143,6 +143,14 @@ private fun ActivityRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (!entry.notes.isNullOrBlank()) {
+                Text(
+                    "📝 ${entry.notes}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.testTag("activityNotes:${entry.taskName}"),
+                )
+            }
         }
         if (onLongPress != null) {
             DropdownMenu(

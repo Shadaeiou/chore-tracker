@@ -48,6 +48,7 @@ data class Task(
     val effortPoints: Int = 1,
     val snoozedUntil: Long? = null,
     val dueness: Double? = null,
+    val notes: String? = null,
 )
 
 @Serializable
@@ -60,6 +61,7 @@ data class CreateTaskRequest(
     val effortPoints: Int? = null,
     val templateId: String? = null,
     val lastDoneAt: Long? = null,
+    val notes: String? = null,
 )
 
 @Serializable
@@ -81,6 +83,7 @@ data class PatchTaskRequest(
     val assignedTo: String? = null,
     val autoRotate: Boolean? = null,
     val effortPoints: Int? = null,
+    val notes: String? = null,
 )
 
 @Serializable
@@ -94,6 +97,7 @@ data class ActivityEntry(
     val areaName: String,
     val doneBy: String,
     val doneAt: Long,
+    val notes: String? = null,
 )
 
 @Serializable
@@ -127,7 +131,7 @@ data class CopyAreaRequest(val name: String)
 data class SnoozeRequest(val until: Long)
 
 @Serializable
-data class CompleteRequest(val at: Long? = null)
+data class CompleteRequest(val at: Long? = null, val notes: String? = null)
 
 @Serializable
 data class Member(val id: String, val displayName: String, val email: String)
