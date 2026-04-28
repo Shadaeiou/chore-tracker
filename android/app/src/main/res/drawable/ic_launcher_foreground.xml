@@ -6,21 +6,24 @@
     <!-- Adaptive icons clip to the inner ~66dp circle (33dp radius from
          center 54,54). Keep the sock entirely within roughly (38,32) to
          (76,76) so the circular launcher mask doesn't crop the cuff or
-         toe. The standalone in-app `ic_sock` keeps the original larger
-         layout because it's not subject to the launcher mask. -->
+         toe. The L-shape biases visual mass to the left, so the sock is
+         offset ~3 units right of geometric center to look optically
+         centered inside the round launcher mask. The standalone in-app
+         `ic_sock` keeps the original larger layout because it's not
+         subject to the launcher mask. -->
     <path
         android:fillColor="#FAFAFA"
-        android:pathData="M36,33 H60 V57 H72 V75 H36 Z"/>
+        android:pathData="M39,33 H63 V57 H75 V75 H39 Z"/>
     <path
         android:fillColor="#D32F2F"
-        android:pathData="M36,33 H60 V39 H36 Z"/>
+        android:pathData="M39,33 H63 V39 H39 Z"/>
     <path
         android:fillColor="#FBC02D"
-        android:pathData="M36,41 H60 V46 H36 Z"/>
+        android:pathData="M39,41 H63 V46 H39 Z"/>
     <path
         android:fillColor="#388E3C"
-        android:pathData="M36,48 H60 V53 H36 Z"/>
+        android:pathData="M39,48 H63 V53 H39 Z"/>
     <path
         android:fillColor="#90CAF9"
-        android:pathData="M66,65 H72 V75 H66 Z"/>
+        android:pathData="M69,65 H75 V75 H69 Z"/>
 </vector>
