@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
@@ -49,7 +50,6 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
@@ -585,7 +585,7 @@ fun HomeScreen(
             areaNameForLibrary = area.name,
             repo = repo,
             onDismiss = { showAddTaskFor = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, _ ->
                 showAddTaskFor = null
                 scope.launch {
                     runCatching {
@@ -618,9 +618,10 @@ fun HomeScreen(
             title = "Edit task",
             initialTask = task,
             members = state.members,
+            areas = state.areas,
             confirmLabel = "Save",
             onDismiss = { editingTask = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, areaId ->
                 editingTask = null
                 scope.launch {
                     runCatching {
@@ -635,6 +636,7 @@ fun HomeScreen(
                                 // PATCH treats notes="" as clear; pass empty string so the
                                 // user can clear by emptying the field, vs null = "leave alone".
                                 notes = notes ?: "",
+                                areaId = areaId,
                             ),
                         )
                     }
@@ -1186,11 +1188,24 @@ private fun TaskRow(
     onSwipeLeft: () -> Unit,
     areaName: String? = null,
 ) {
-    val ratio = task.dirtiness().toFloat()
-    val color = when {
-        ratio >= 1.0f -> Color(0xFFD32F2F)
-        ratio >= 0.66f -> Color(0xFFF57C00)
-        ratio >= 0.33f -> Color(0xFFFBC02D)
+    val now = System.currentTimeMillis()
+    val freqMs = task.frequencyDays.toLong() * 86_400_000L
+    val due = (task.lastDoneAt ?: 0L) + freqMs
+    val dayMs = 86_400_000L
+    val startOfToday = (now / dayMs) * dayMs
+    val startOfTomorrow = startOfToday + dayMs
+
+    // Three-color status:
+    // - red: overdue (due before today)
+    // - yellow: due today (due is in [startOfToday, startOfTomorrow))
+    // - green: due in the future
+    // A task that's never been done is treated as "due now" (red) unless
+    // freq pushes it out — which mirrors the behavior of the existing
+    // `dirtiness()` helper.
+    val statusColor = when {
+        task.lastDoneAt == null -> Color(0xFFD32F2F)
+        due < startOfToday -> Color(0xFFD32F2F)
+        due < startOfTomorrow -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
 
@@ -1202,7 +1217,6 @@ private fun TaskRow(
                 SwipeToDismissBoxValue.Settled -> false
             }
         },
-        // Require ~30% of the row width before a swipe counts as triggered.
         positionalThreshold = { distance -> distance * 0.3f },
     )
 
@@ -1245,20 +1259,64 @@ private fun TaskRow(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface)
                 .clickable(onClick = onTap)
-                .padding(vertical = 6.dp, horizontal = 4.dp),
+                .padding(vertical = 8.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Status circle
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .background(statusColor, CircleShape)
+                    .testTag("statusDot:${task.name}"),
+            )
+            Spacer(Modifier.size(12.dp))
+            // Center column: name + secondary line
             Column(Modifier.weight(1f)) {
+                Text(task.name, style = MaterialTheme.typography.bodyLarge)
+                val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
+                val secondary = when {
+                    snoozed -> {
+                        val days = ((task.snoozedUntil!! - now) / dayMs).coerceAtLeast(0)
+                        "snoozed · $days day${if (days == 1L) "" else "s"} left"
+                    }
+                    else -> {
+                        val areaPart = areaName?.let { "$it · " } ?: ""
+                        "${areaPart}every ${task.frequencyDays}d"
+                    }
+                }
+                Text(
+                    secondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (snoozed) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // Right column: last-done summary on top, icons row beneath
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatLastDone(task.lastDoneAt, now),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                task.lastDoneBy?.let { by ->
+                    Text(
+                        "by $by",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.size(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(task.name)
-                        if (areaName != null) {
-                            Text(
-                                areaName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    if (!task.notes.isNullOrBlank()) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Notes,
+                            contentDescription = "Has notes",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .testTag("taskNotes:${task.name}"),
+                        )
+                        Spacer(Modifier.size(6.dp))
                     }
                     task.assignedToName?.let { name ->
                         Box(
@@ -1276,47 +1334,20 @@ private fun TaskRow(
                         }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = { ratio.coerceIn(0f, 1f) },
-                    color = color,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                val attribution = task.lastDoneBy?.let { "last done by $it" } ?: "never done"
-                val snoozed = task.snoozedUntil != null && task.snoozedUntil > System.currentTimeMillis()
-                if (snoozed) {
-                    val days = ((task.snoozedUntil!! - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0)
-                    Text(
-                        "snoozed · $days day${if (days == 1L) "" else "s"} left",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                } else {
-                    val statusText = when {
-                        ratio > 1.0f -> {
-                            val days = ((ratio - 1.0f) * task.frequencyDays).toLong()
-                            if (days <= 0) "due now"
-                            else "$days day${if (days == 1L) "" else "s"} overdue"
-                        }
-                        else -> "${(ratio * 100).toInt()}%"
-                    }
-                    Text(
-                        "every ${task.frequencyDays}d · $statusText · $attribution",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                task.notes?.takeIf { it.isNotBlank() }?.let { n ->
-                    Text(
-                        "📝 $n",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("taskNotes:${task.name}"),
-                    )
-                }
             }
         }
+    }
+}
+
+private fun formatLastDone(lastDoneAt: Long?, now: Long): String {
+    if (lastDoneAt == null) return "N/A"
+    val deltaDays = ((now - lastDoneAt) / 86_400_000L).coerceAtLeast(0)
+    return when (deltaDays) {
+        0L -> "today"
+        1L -> "yesterday"
+        in 2L..29L -> "${deltaDays}d ago"
+        in 30L..364L -> "${deltaDays / 30}mo ago"
+        else -> "${deltaDays / 365}y ago"
     }
 }
 
@@ -1653,8 +1684,9 @@ private fun TaskFormDialog(
     confirmLabel: String = "Add",
     areaNameForLibrary: String? = null,
     repo: Repo? = null,
+    areas: List<Area> = emptyList(),
     onDismiss: () -> Unit,
-    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int, notes: String?) -> Unit,
+    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int, notes: String?, areaId: String?) -> Unit,
 ) {
     var name by remember { mutableStateOf(initialTask?.name ?: "") }
     var freq by remember { mutableStateOf(initialTask?.frequencyDays?.toString() ?: "7") }
@@ -1664,7 +1696,10 @@ private fun TaskFormDialog(
     var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
     var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
     var notes by remember { mutableStateOf(initialTask?.notes ?: "") }
+    val initialArea = initialTask?.let { t -> areas.firstOrNull { it.id == t.areaId } }
+    var selectedArea by remember { mutableStateOf<Area?>(initialArea) }
     var assigneeExpanded by remember { mutableStateOf(false) }
+    var areaExpanded by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
 
     val testDialogTag = if (initialTask == null) "addTaskDialog" else "editTaskDialog"
@@ -1687,6 +1722,36 @@ private fun TaskFormDialog(
                     label = { Text("Task name") },
                     modifier = Modifier.testTag("taskNameField"),
                 )
+                // Area picker only shown when editing — new tasks pick area
+                // implicitly via the area card's "+ Add task" button.
+                if (initialTask != null && areas.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = areaExpanded,
+                        onExpandedChange = { areaExpanded = it },
+                        modifier = Modifier.testTag("areaPicker"),
+                    ) {
+                        OutlinedTextField(
+                            value = selectedArea?.name ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Area") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(areaExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = areaExpanded,
+                            onDismissRequest = { areaExpanded = false },
+                        ) {
+                            areas.forEach { area ->
+                                DropdownMenuItem(
+                                    text = { Text(area.name) },
+                                    onClick = { selectedArea = area; areaExpanded = false },
+                                    modifier = Modifier.testTag("areaOption:${area.name}"),
+                                )
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     freq,
                     { freq = it.filter { c -> c.isDigit() } },
@@ -1771,6 +1836,7 @@ private fun TaskFormDialog(
                         autoRotate,
                         effortPoints.roundToInt(),
                         notes.trim().ifBlank { null },
+                        selectedArea?.id?.takeIf { it != initialTask?.areaId },
                     )
                 },
             ) { Text(confirmLabel) }

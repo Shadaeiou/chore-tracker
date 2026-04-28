@@ -55,8 +55,9 @@ class ActivityScreenTest {
         compose.onNodeWithTag("activityRow:Vacuum").assertIsDisplayed()
         compose.onNodeWithText("Vacuum").assertIsDisplayed()
         compose.onNodeWithTag("activityRow:Scrub tub").assertIsDisplayed()
-        compose.onNodeWithText("Living room · Alice", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Bathroom · Bob", substring = true).assertIsDisplayed()
+        // Area renders as a separate label beneath the task name now.
+        compose.onNodeWithText("Living room").assertIsDisplayed()
+        compose.onNodeWithText("Bathroom").assertIsDisplayed()
     }
 
     @Test fun `long press shows undo menu and confirmation dialog`() {

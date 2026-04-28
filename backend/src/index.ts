@@ -606,6 +606,7 @@ app.patch("/api/tasks/:id", async (c) => {
     autoRotate?: boolean;
     effortPoints?: number;
     notes?: string | null;
+    areaId?: string;
   }>();
 
   const task = await c.env.DB.prepare(
@@ -617,6 +618,14 @@ app.patch("/api/tasks/:id", async (c) => {
 
   const sets: string[] = [];
   const bindings: unknown[] = [];
+  if (body.areaId !== undefined) {
+    // Moving a task to a different area is allowed only within the same household.
+    const newArea = await c.env.DB.prepare(
+      "SELECT id FROM areas WHERE id = ? AND household_id = ?",
+    ).bind(body.areaId, hh).first();
+    if (!newArea) throw new HTTPException(400, { message: "areaId is not in this household" });
+    sets.push("area_id = ?"); bindings.push(body.areaId);
+  }
   if (body.name !== undefined) { sets.push("name = ?"); bindings.push(body.name); }
   if (body.frequencyDays !== undefined) {
     if (body.frequencyDays <= 0) throw new HTTPException(400, { message: "frequencyDays must be positive" });

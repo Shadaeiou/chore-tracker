@@ -84,6 +84,7 @@ data class PatchTaskRequest(
     val autoRotate: Boolean? = null,
     val effortPoints: Int? = null,
     val notes: String? = null,
+    val areaId: String? = null,
 )
 
 @Serializable

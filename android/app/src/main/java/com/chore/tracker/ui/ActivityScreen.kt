@@ -1,20 +1,28 @@
 package com.chore.tracker.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,6 +64,7 @@ fun ActivityScreen(
         activity.groupBy { dateFormatter.format(Date(it.doneAt)) }
     }
     var pendingUndo by remember { mutableStateOf<ActivityEntry?>(null) }
+    var detailsFor by remember { mutableStateOf<ActivityEntry?>(null) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("activityScreen"),
@@ -82,12 +91,22 @@ fun ActivityScreen(
                 ActivityRow(
                     entry = entry,
                     timeFormatter = timeFormatter,
+                    onClick = { detailsFor = entry },
                     onLongPress = if (onUndo != null) {
                         { pendingUndo = entry }
                     } else null,
                 )
             }
         }
+    }
+
+    detailsFor?.let { entry ->
+        ActivityDetailsDialog(
+            entry = entry,
+            timeFormatter = timeFormatter,
+            dateFormatter = dateFormatter,
+            onDismiss = { detailsFor = null },
+        )
     }
 
     pendingUndo?.let { entry ->
@@ -121,35 +140,68 @@ fun ActivityScreen(
 private fun ActivityRow(
     entry: ActivityEntry,
     timeFormatter: SimpleDateFormat,
+    onClick: () -> Unit,
     onLongPress: (() -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(
-                    if (onLongPress != null) Modifier.combinedClickable(
-                        onClick = {},
-                        onLongClick = { menuExpanded = true },
-                    ) else Modifier,
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = if (onLongPress != null) {
+                        { menuExpanded = true }
+                    } else null,
                 )
-                .padding(vertical = 8.dp)
+                .padding(vertical = 10.dp)
                 .testTag("activityRow:${entry.taskName}"),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(entry.taskName, style = MaterialTheme.typography.bodyMedium)
+            // Time pill on the left
             Text(
-                "${entry.areaName} · ${entry.doneBy} · ${timeFormatter.format(Date(entry.doneAt))}",
-                style = MaterialTheme.typography.bodySmall,
+                timeFormatter.format(Date(entry.doneAt)),
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(width = 72.dp, height = 20.dp),
             )
-            if (!entry.notes.isNullOrBlank()) {
+            // Center: task name + area
+            Column(Modifier.weight(1f)) {
+                Text(entry.taskName, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "📝 ${entry.notes}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.testTag("activityNotes:${entry.taskName}"),
+                    entry.areaName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            // Right: who + notes indicator
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                // Initial badge for the doer
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        entry.doneBy.take(1).uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+                if (!entry.notes.isNullOrBlank()) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Notes,
+                        contentDescription = "Has notes",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .testTag("activityNotes:${entry.taskName}"),
+                    )
+                }
             }
         }
         if (onLongPress != null) {
@@ -166,4 +218,44 @@ private fun ActivityRow(
             }
         }
     }
+}
+
+@Composable
+private fun ActivityDetailsDialog(
+    entry: ActivityEntry,
+    timeFormatter: SimpleDateFormat,
+    dateFormatter: SimpleDateFormat,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        modifier = Modifier.testTag("activityDetails:${entry.taskName}"),
+        onDismissRequest = onDismiss,
+        title = { Text(entry.taskName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${entry.areaName} · ${entry.doneBy}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Completed ${dateFormatter.format(Date(entry.doneAt))} at " +
+                        timeFormatter.format(Date(entry.doneAt)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!entry.notes.isNullOrBlank()) {
+                    HorizontalDivider()
+                    Text("Notes", style = MaterialTheme.typography.labelMedium)
+                    Text(entry.notes, style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text(
+                        "No notes were left for this completion.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
