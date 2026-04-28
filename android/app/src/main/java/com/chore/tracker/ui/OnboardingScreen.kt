@@ -42,6 +42,7 @@ import com.chore.tracker.data.TaskTemplate
 import kotlinx.coroutines.launch
 
 private val SUPPORTED_ROOMS = listOf(
+    // Cleaning
     "kitchen" to "Kitchen",
     "bathroom" to "Bathroom",
     "bedroom" to "Bedroom",
@@ -52,6 +53,13 @@ private val SUPPORTED_ROOMS = listOf(
     "pets" to "Pets",
     "kids" to "Kids",
     "seasonal" to "Seasonal",
+    // Beyond cleaning — recurring life admin
+    "errands" to "Errands",
+    "vehicle" to "Vehicle",
+    "personal" to "Personal",
+    "financial" to "Financial",
+    "plants" to "Plants",
+    "family" to "Family",
 )
 
 @OptIn(ExperimentalLayoutApi::class)
