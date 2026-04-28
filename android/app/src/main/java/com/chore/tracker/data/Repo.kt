@@ -15,6 +15,7 @@ data class HouseholdState(
     val members: List<Member> = emptyList(),
     val activity: List<ActivityEntry> = emptyList(),
     val workload: List<WorkloadEntry> = emptyList(),
+    val todos: List<TodoItem> = emptyList(),
     val pausedUntil: Long? = null,
     val currentUserId: String? = null,
     val isLoading: Boolean = false,
@@ -91,6 +92,7 @@ class Repo(
             val household = api.household()
             val activity = api.activity()
             val workload = api.workload()
+            val todos = runCatching { api.todos() }.getOrDefault(emptyList())
             _state.value = HouseholdState(
                 household = household.household,
                 areas = areas,
@@ -98,6 +100,7 @@ class Repo(
                 members = household.members,
                 activity = activity,
                 workload = workload,
+                todos = todos,
                 pausedUntil = household.household.pausedUntil,
                 currentUserId = jwtSub(session.token()),
                 isLoading = false,

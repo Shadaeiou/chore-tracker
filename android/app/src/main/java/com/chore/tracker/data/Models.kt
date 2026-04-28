@@ -173,6 +173,27 @@ data class UserAvatarResponse(
 )
 
 @Serializable
+data class TodoItem(
+    val id: String,
+    val ownerId: String,
+    val text: String,
+    val doneAt: Long? = null,
+    val isPublic: Boolean = false,
+    val createdAt: Long,
+)
+
+@Serializable
+data class CreateTodoRequest(val text: String, val isPublic: Boolean = false)
+
+/** Toggling done state. Always sent with doneAt either set or null. */
+@Serializable
+data class MarkTodoDoneRequest(val doneAt: Long?)
+
+/** Editing the text body / visibility. */
+@Serializable
+data class EditTodoRequest(val text: String, val isPublic: Boolean)
+
+@Serializable
 data class HouseholdResponse(val household: Household, val members: List<Member>)
 
 /** Computed dirtiness 0.0 (just done) → 1.0 (due) → >1.0 (overdue).

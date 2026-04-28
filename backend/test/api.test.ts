@@ -1149,6 +1149,93 @@ describe("/api/me (self profile)", () => {
   });
 });
 
+describe("/api/todos (à la carte reminders)", () => {
+  it("creates and lists my own todos", async () => {
+    const auth = await register();
+    const create = await api("/api/todos", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ text: "Buy diapers" }),
+    });
+    expect(create.status).toBe(200);
+    const list = (await (await api("/api/todos", { token: auth.token })).json()) as Array<{
+      text: string; ownerId: string; isPublic: boolean; doneAt: number | null;
+    }>;
+    expect(list).toHaveLength(1);
+    expect(list[0].text).toBe("Buy diapers");
+    expect(list[0].ownerId).toBe(auth.userId);
+    expect(list[0].isPublic).toBe(false);
+    expect(list[0].doneAt).toBeNull();
+  });
+
+  it("rejects empty text", async () => {
+    const auth = await register();
+    const res = await api("/api/todos", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ text: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("marks done via PATCH", async () => {
+    const auth = await register();
+    const created = (await (await api("/api/todos", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ text: "Mop" }),
+    })).json()) as { id: string };
+    const now = Date.now();
+    const patch = await api(`/api/todos/${created.id}`, {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ doneAt: now }),
+    });
+    expect(patch.status).toBe(200);
+    const list = (await (await api("/api/todos", { token: auth.token })).json()) as Array<{ doneAt: number | null }>;
+    expect(list[0].doneAt).toBe(now);
+  });
+
+  it("housemates see public todos but not private ones", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+
+    await api("/api/todos", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ text: "Public reminder", isPublic: true }),
+    });
+    await api("/api/todos", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ text: "Private note" }),
+    });
+
+    const bobView = (await (await api("/api/todos", { token: bob.token })).json()) as Array<{ text: string }>;
+    const texts = bobView.map((t) => t.text);
+    expect(texts).toContain("Public reminder");
+    expect(texts).not.toContain("Private note");
+  });
+
+  it("only the owner can patch or delete their todo", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const aliceTodo = (await (await api("/api/todos", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ text: "Mine", isPublic: true }),
+    })).json()) as { id: string };
+    const bobPatch = await api(`/api/todos/${aliceTodo.id}`, {
+      method: "PATCH", token: bob.token,
+      body: JSON.stringify({ text: "Hijack" }),
+    });
+    expect(bobPatch.status).toBe(404);
+    const bobDelete = await api(`/api/todos/${aliceTodo.id}`, {
+      method: "DELETE", token: bob.token,
+    });
+    expect(bobDelete.status).toBe(404);
+  });
+});
+
 describe("PATCH /api/household (rename)", () => {
   it("updates name", async () => {
     const auth = await register({ householdName: "Old name" });

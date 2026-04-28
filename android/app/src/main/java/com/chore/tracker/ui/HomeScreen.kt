@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
@@ -103,6 +104,9 @@ import com.chore.tracker.data.Area
 import com.chore.tracker.data.CompleteRequest
 import com.chore.tracker.data.CreateAreaRequest
 import com.chore.tracker.data.CreateTaskRequest
+import com.chore.tracker.data.CreateTodoRequest
+import com.chore.tracker.data.MarkTodoDoneRequest
+import com.chore.tracker.data.TodoItem
 import com.chore.tracker.data.DeviceTokenRequest
 import com.chore.tracker.data.Member
 import com.chore.tracker.data.PatchAreaRequest
@@ -265,6 +269,28 @@ fun HomeScreen(
                                 onSwipeRight = { notesCompletionTask = it },
                                 onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
                                 onViewNotes = { viewingNotes = it },
+                                onAddTodo = { text, isPublic ->
+                                    scope.launch {
+                                        runCatching { repo.api.createTodo(CreateTodoRequest(text, isPublic)) }
+                                            .onSuccess { repo.refresh() }
+                                            .onFailure { snackbarHost.showSnackbar("Couldn't add: ${it.message}") }
+                                    }
+                                },
+                                onToggleTodoDone = { todo, done ->
+                                    scope.launch {
+                                        val payload = MarkTodoDoneRequest(if (done) System.currentTimeMillis() else null)
+                                        runCatching { repo.api.markTodoDone(todo.id, payload) }
+                                            .onSuccess { repo.refresh() }
+                                            .onFailure { snackbarHost.showSnackbar("Couldn't update: ${it.message}") }
+                                    }
+                                },
+                                onDeleteTodo = { todo ->
+                                    scope.launch {
+                                        runCatching { repo.api.deleteTodo(todo.id) }
+                                            .onSuccess { repo.refresh() }
+                                            .onFailure { snackbarHost.showSnackbar("Couldn't delete: ${it.message}") }
+                                    }
+                                },
                             )
                         }
                     }
@@ -396,6 +422,7 @@ fun HomeScreen(
                                         area = area,
                                         tasks = areaTasks,
                                         indicators = statusIndicators,
+                                        avatarVersionByUser = state.members.associate { it.id to it.avatarVersion },
                                         collapsed = area.id in collapsedAreaIds,
                                         onToggleCollapsed = {
                                             scope.launch {
@@ -1151,6 +1178,9 @@ private fun TodayList(
     onSwipeRight: (Task) -> Unit,
     onSwipeLeft: (Task) -> Unit,
     onViewNotes: (Task) -> Unit,
+    onAddTodo: (text: String, isPublic: Boolean) -> Unit,
+    onToggleTodoDone: (TodoItem, done: Boolean) -> Unit,
+    onDeleteTodo: (TodoItem) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     val startOfTomorrow = remember(now) {
@@ -1187,32 +1217,244 @@ private fun TodayList(
             .sortedByDescending { it.dirtiness(now) }
     }
     val areaNamesById = remember(state.areas) { state.areas.associate { it.id to it.name } }
+    val avatarVersionByUser = remember(state.members) {
+        state.members.associate { it.id to it.avatarVersion }
+    }
 
-    if (visibleTasks.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    val startOfToday = startOfTomorrow - 86_400_000L
+    // Visible todos: every open one, plus done ones still inside today's window.
+    val myTodos = remember(state.todos, me, startOfToday) {
+        state.todos.filter { it.ownerId == me && (it.doneAt == null || it.doneAt >= startOfToday) }
+    }
+    val othersTodosByOwner = remember(state.todos, me, startOfToday) {
+        state.todos
+            .filter { it.ownerId != me && it.isPublic && (it.doneAt == null || it.doneAt >= startOfToday) }
+            .groupBy { it.ownerId }
+    }
+    val membersById = remember(state.members) { state.members.associateBy { it.id } }
+
+    var showAddTodo by remember { mutableStateOf(false) }
+    val onPaused = state.pausedUntil != null && state.pausedUntil > now
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp).testTag("todayList"),
+    ) {
+        // ── Reminders section ────────────────────────────────────────────
+        item("remindersHeader") {
+            ReminderSectionHeader(
+                title = "Your reminders",
+                onAdd = { showAddTodo = true },
+            )
+        }
+        items(myTodos, key = { "todo-${it.id}" }) { todo ->
+            TodoRow(
+                todo = todo,
+                showOwner = false,
+                ownerName = null,
+                canEdit = true,
+                onToggle = { done -> onToggleTodoDone(todo, done) },
+                onDelete = { onDeleteTodo(todo) },
+            )
+        }
+        if (myTodos.isEmpty()) {
+            item("noMyTodos") {
+                Text(
+                    "Tap + to add a one-off reminder.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+        }
+        othersTodosByOwner.forEach { (ownerId, list) ->
+            val ownerName = membersById[ownerId]?.displayName ?: "Member"
+            item("ownerHeader-$ownerId") {
+                ReminderSectionHeader(title = "$ownerName's reminders", onAdd = null)
+            }
+            items(list, key = { "todo-${it.id}" }) { todo ->
+                TodoRow(
+                    todo = todo,
+                    showOwner = false,
+                    ownerName = ownerName,
+                    canEdit = false,
+                    onToggle = {},
+                    onDelete = {},
+                )
+            }
+        }
+
+        // ── Chores section ───────────────────────────────────────────────
+        item("choresHeader") {
             Text(
-                if (state.pausedUntil != null && state.pausedUntil > now)
-                    "Vacation mode — nothing's due."
-                else "Nothing due today 🎉",
-                style = MaterialTheme.typography.bodyMedium,
+                "Today's chores",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
             )
         }
-        return
+        if (visibleTasks.isEmpty()) {
+            item("noChores") {
+                Text(
+                    if (onPaused) "Vacation mode — nothing's due."
+                    else "Nothing due today 🎉",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+        } else {
+            items(visibleTasks, key = { it.id }) { task ->
+                TaskRow(
+                    task = task,
+                    areaName = areaNamesById[task.areaId],
+                    indicators = indicators,
+                    onTap = null,  // Today is read-only triage; edit lives on Household
+                    onSwipeRight = { onSwipeRight(task) },
+                    onSwipeLeft = { onSwipeLeft(task) },
+                    onViewNotes = { onViewNotes(task) },
+                    assigneeAvatarVersion = avatarVersionByUser[task.assignedTo] ?: 0,
+                )
+            }
+        }
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-        items(visibleTasks, key = { it.id }) { task ->
-            TaskRow(
-                task = task,
-                areaName = areaNamesById[task.areaId],
-                indicators = indicators,
-                onTap = null,  // Today is read-only triage; edit lives on Household
-                onSwipeRight = { onSwipeRight(task) },
-                onSwipeLeft = { onSwipeLeft(task) },
-                onViewNotes = { onViewNotes(task) },
-            )
+    if (showAddTodo) {
+        AddTodoDialog(
+            onDismiss = { showAddTodo = false },
+            onConfirm = { text, isPublic ->
+                showAddTodo = false
+                onAddTodo(text, isPublic)
+            },
+        )
+    }
+}
+
+@Composable
+private fun ReminderSectionHeader(
+    title: String,
+    onAdd: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        if (onAdd != null) {
+            IconButton(
+                modifier = Modifier.testTag("addTodoButton"),
+                onClick = onAdd,
+            ) { Icon(Icons.Default.Add, contentDescription = "Add reminder") }
         }
     }
+}
+
+@Composable
+private fun TodoRow(
+    todo: TodoItem,
+    showOwner: Boolean,
+    ownerName: String?,
+    canEdit: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    val done = todo.doneAt != null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .testTag("todoRow:${todo.text}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.Checkbox(
+            checked = done,
+            onCheckedChange = if (canEdit) { v -> onToggle(v) } else null,
+            enabled = canEdit,
+            modifier = Modifier.testTag("todoCheckbox:${todo.text}"),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                todo.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (done) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (done) androidx.compose.ui.text.style.TextDecoration.LineThrough
+                else null,
+            )
+            if (showOwner && ownerName != null) {
+                Text(
+                    ownerName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (!todo.isPublic && canEdit) {
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = "Private",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        if (canEdit) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.testTag("todoDelete:${todo.text}"),
+            ) { Icon(Icons.Default.Clear, contentDescription = "Delete") }
+        }
+    }
+}
+
+@Composable
+private fun AddTodoDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, Boolean) -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    var isPublic by remember { mutableStateOf(false) }
+    AlertDialog(
+        modifier = Modifier.testTag("addTodoDialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("Add a reminder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("What do you want to do?") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("todoTextField"),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Public", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Visible to other household members",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = isPublic,
+                        onCheckedChange = { isPublic = it },
+                        modifier = Modifier.testTag("todoPublicToggle"),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = text.isNotBlank(),
+                modifier = Modifier.testTag("todoConfirm"),
+                onClick = { onConfirm(text.trim(), isPublic) },
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1232,6 +1474,7 @@ private fun AreaCard(
     onMassDeleteTasks: (List<String>) -> Unit,
     onSwipeRightTask: (Task) -> Unit,
     onSwipeLeftTask: (Task) -> Unit,
+    avatarVersionByUser: Map<String, Int> = emptyMap(),
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var selectionMode by remember { mutableStateOf(false) }
@@ -1358,6 +1601,7 @@ private fun AreaCard(
                                 onTap = { onEditTask(task) },
                                 onSwipeRight = { onSwipeRightTask(task) },
                                 onSwipeLeft = { onSwipeLeftTask(task) },
+                                assigneeAvatarVersion = avatarVersionByUser[task.assignedTo] ?: 0,
                             )
                             Spacer(Modifier.height(6.dp))
                         }
@@ -1412,6 +1656,7 @@ private fun TaskRow(
     indicators: StatusIndicators = StatusIndicators(),
     onViewNotes: (() -> Unit)? = null,
     areaName: String? = null,
+    assigneeAvatarVersion: Int = 0,
 ) {
     val now = System.currentTimeMillis()
     val freqMs = task.frequencyDays.toLong() * 86_400_000L
@@ -1537,11 +1782,21 @@ private fun TaskRow(
                             color = MaterialTheme.colorScheme.tertiary,
                         )
                     } else {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                             areaName?.let { TagChip(it) }
                             if (task.onDemand) TagChip("on demand")
                             else TagChip("${task.frequencyDays}d")
-                            task.assignedToName?.let { TagChip(it) }
+                            task.assignedTo?.let { id ->
+                                AvatarBadge(
+                                    userId = id,
+                                    avatarVersion = assigneeAvatarVersion,
+                                    fallbackText = task.assignedToName?.take(1)?.uppercase().orEmpty().ifBlank { "?" },
+                                    size = 20,
+                                )
+                            }
                             if (task.effortPoints > 1) {
                                 TagChip("E:${task.effortPoints}")
                             }
@@ -1877,6 +2132,8 @@ private fun SnoozeOrDeleteDialog(
     onSnooze: (until: Long) -> Unit,
     onDelete: (() -> Unit)?,
 ) {
+    val now = System.currentTimeMillis()
+    val isSnoozed = task.snoozedUntil != null && task.snoozedUntil > now
     var amount by remember { mutableStateOf("1") }
     var unit by remember { mutableStateOf(SnoozeUnit.DAYS) }
     var unitExpanded by remember { mutableStateOf(false) }
@@ -1886,47 +2143,55 @@ private fun SnoozeOrDeleteDialog(
         onDismissRequest = onDismiss,
         title = { Text("\"${task.name}\"") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Snooze for")
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedTextField(
-                        value = amount,
-                        onValueChange = { v -> amount = v.filter { it.isDigit() }.take(4) },
-                        label = { Text("N") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("snoozeAmountField"),
-                    )
-                    ExposedDropdownMenuBox(
-                        expanded = unitExpanded,
-                        onExpandedChange = { unitExpanded = it },
-                        modifier = Modifier.weight(2f),
+            if (isSnoozed) {
+                val daysLeft = ((task.snoozedUntil!! - now) / 86_400_000L).coerceAtLeast(0)
+                Text(
+                    "Snoozed for $daysLeft day${if (daysLeft == 1L) "" else "s"} more. " +
+                        "Tap unsnooze to bring it back now.",
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Snooze for")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         OutlinedTextField(
-                            value = unit.label,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Unit") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(unitExpanded) },
+                            value = amount,
+                            onValueChange = { v -> amount = v.filter { it.isDigit() }.take(4) },
+                            label = { Text("N") },
+                            singleLine = true,
                             modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth()
-                                .testTag("snoozeUnitField"),
+                                .weight(1f)
+                                .testTag("snoozeAmountField"),
                         )
-                        ExposedDropdownMenu(
+                        ExposedDropdownMenuBox(
                             expanded = unitExpanded,
-                            onDismissRequest = { unitExpanded = false },
+                            onExpandedChange = { unitExpanded = it },
+                            modifier = Modifier.weight(2f),
                         ) {
-                            SnoozeUnit.entries.forEach { u ->
-                                DropdownMenuItem(
-                                    text = { Text(u.label) },
-                                    onClick = { unit = u; unitExpanded = false },
-                                    modifier = Modifier.testTag("snoozeUnitOption:${u.name}"),
-                                )
+                            OutlinedTextField(
+                                value = unit.label,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Unit") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(unitExpanded) },
+                                modifier = Modifier
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                    .fillMaxWidth()
+                                    .testTag("snoozeUnitField"),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = unitExpanded,
+                                onDismissRequest = { unitExpanded = false },
+                            ) {
+                                SnoozeUnit.entries.forEach { u ->
+                                    DropdownMenuItem(
+                                        text = { Text(u.label) },
+                                        onClick = { unit = u; unitExpanded = false },
+                                        modifier = Modifier.testTag("snoozeUnitOption:${u.name}"),
+                                    )
+                                }
                             }
                         }
                     }
@@ -1934,21 +2199,31 @@ private fun SnoozeOrDeleteDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = (amount.toIntOrNull() ?: 0) > 0,
-                modifier = Modifier.testTag("snoozeConfirm"),
-                onClick = {
-                    val n = amount.toIntOrNull() ?: 1
-                    val cal = java.util.Calendar.getInstance()
-                    when (unit) {
-                        SnoozeUnit.DAYS -> cal.add(java.util.Calendar.DAY_OF_MONTH, n)
-                        SnoozeUnit.WEEKS -> cal.add(java.util.Calendar.WEEK_OF_YEAR, n)
-                        SnoozeUnit.MONTHS -> cal.add(java.util.Calendar.MONTH, n)
-                        SnoozeUnit.YEARS -> cal.add(java.util.Calendar.YEAR, n)
-                    }
-                    onSnooze(cal.timeInMillis)
-                },
-            ) { Text("Snooze") }
+            if (isSnoozed) {
+                TextButton(
+                    modifier = Modifier.testTag("unsnoozeConfirm"),
+                    // Snoozing to a past timestamp clears the active snooze:
+                    // the server stores it but `snoozedUntil > now` is false,
+                    // so the task immediately reappears.
+                    onClick = { onSnooze(0L) },
+                ) { Text("Unsnooze") }
+            } else {
+                TextButton(
+                    enabled = (amount.toIntOrNull() ?: 0) > 0,
+                    modifier = Modifier.testTag("snoozeConfirm"),
+                    onClick = {
+                        val n = amount.toIntOrNull() ?: 1
+                        val cal = java.util.Calendar.getInstance()
+                        when (unit) {
+                            SnoozeUnit.DAYS -> cal.add(java.util.Calendar.DAY_OF_MONTH, n)
+                            SnoozeUnit.WEEKS -> cal.add(java.util.Calendar.WEEK_OF_YEAR, n)
+                            SnoozeUnit.MONTHS -> cal.add(java.util.Calendar.MONTH, n)
+                            SnoozeUnit.YEARS -> cal.add(java.util.Calendar.YEAR, n)
+                        }
+                        onSnooze(cal.timeInMillis)
+                    },
+                ) { Text("Snooze") }
+            }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

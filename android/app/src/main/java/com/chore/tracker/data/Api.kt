@@ -32,6 +32,21 @@ interface ChoreApi {
     @GET("api/users/{id}/avatar")
     suspend fun userAvatar(@Path("id") id: String): UserAvatarResponse
 
+    @GET("api/todos")
+    suspend fun todos(): List<TodoItem>
+
+    @POST("api/todos")
+    suspend fun createTodo(@Body req: CreateTodoRequest): TodoItem
+
+    @PATCH("api/todos/{id}")
+    suspend fun markTodoDone(@Path("id") id: String, @Body req: MarkTodoDoneRequest)
+
+    @PATCH("api/todos/{id}")
+    suspend fun editTodo(@Path("id") id: String, @Body req: EditTodoRequest)
+
+    @DELETE("api/todos/{id}")
+    suspend fun deleteTodo(@Path("id") id: String)
+
     @GET("api/household")
     suspend fun household(): HouseholdResponse
 

@@ -910,6 +910,79 @@ app.delete("/api/tasks/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- Todos (à la carte reminders) ----------
+
+app.get("/api/todos", async (c) => {
+  const { sub, hh } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, owner_id AS ownerId, text, done_at AS doneAt,
+            is_public AS isPublic, created_at AS createdAt
+       FROM todos
+      WHERE household_id = ?
+        AND (owner_id = ? OR is_public = 1)
+      ORDER BY done_at IS NOT NULL, created_at DESC`,
+  ).bind(hh, sub).all<{
+    id: string; ownerId: string; text: string;
+    doneAt: number | null; isPublic: number; createdAt: number;
+  }>();
+  return c.json(results.map((r) => ({ ...r, isPublic: r.isPublic !== 0 })));
+});
+
+app.post("/api/todos", async (c) => {
+  const { sub, hh } = c.get("user");
+  const body = await c.req.json<{ text?: string; isPublic?: boolean }>();
+  const text = body.text?.trim();
+  if (!text) throw new HTTPException(400, { message: "text required" });
+  const id = newId();
+  const now = Date.now();
+  const isPublic = body.isPublic ? 1 : 0;
+  await c.env.DB.prepare(
+    `INSERT INTO todos (id, household_id, owner_id, text, is_public, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(id, hh, sub, text, isPublic, now).run();
+  await fanOutRefresh(c, hh, sub);
+  return c.json({
+    id, ownerId: sub, text, doneAt: null,
+    isPublic: isPublic !== 0, createdAt: now,
+  });
+});
+
+app.patch("/api/todos/:id", async (c) => {
+  const { sub, hh } = c.get("user");
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    text?: string; isPublic?: boolean; doneAt?: number | null;
+  }>();
+  const todo = await c.env.DB.prepare(
+    `SELECT id FROM todos WHERE id = ? AND household_id = ? AND owner_id = ?`,
+  ).bind(id, hh, sub).first();
+  if (!todo) throw new HTTPException(404);
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if (body.text !== undefined) {
+    if (!body.text.trim()) throw new HTTPException(400, { message: "text cannot be blank" });
+    sets.push("text = ?"); bindings.push(body.text.trim());
+  }
+  if (body.isPublic !== undefined) { sets.push("is_public = ?"); bindings.push(body.isPublic ? 1 : 0); }
+  if ("doneAt" in body) { sets.push("done_at = ?"); bindings.push(body.doneAt ?? null); }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+  bindings.push(id);
+  await c.env.DB.prepare(`UPDATE todos SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
+app.delete("/api/todos/:id", async (c) => {
+  const { sub, hh } = c.get("user");
+  const id = c.req.param("id");
+  const res = await c.env.DB.prepare(
+    `DELETE FROM todos WHERE id = ? AND household_id = ? AND owner_id = ?`,
+  ).bind(id, hh, sub).run();
+  if (!res.meta.changes) throw new HTTPException(404);
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
 // ---------- Error handler ----------
 
 app.onError((err, c) => {

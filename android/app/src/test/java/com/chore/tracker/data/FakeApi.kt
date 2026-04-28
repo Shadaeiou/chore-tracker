@@ -155,4 +155,27 @@ class FakeApi : ChoreApi {
     }
     override suspend fun registerDeviceToken(req: DeviceTokenRequest) { maybeThrow() }
     override suspend fun deleteDeviceToken(token: String) { maybeThrow() }
+    var todoList: MutableList<TodoItem> = mutableListOf()
+    override suspend fun todos(): List<TodoItem> { maybeThrow(); return todoList.toList() }
+    override suspend fun createTodo(req: CreateTodoRequest): TodoItem {
+        maybeThrow()
+        val t = TodoItem(
+            id = "todo-${todoList.size + 1}",
+            ownerId = nextAuth.userId,
+            text = req.text,
+            isPublic = req.isPublic,
+            createdAt = System.currentTimeMillis(),
+        )
+        todoList.add(t)
+        return t
+    }
+    override suspend fun markTodoDone(id: String, req: MarkTodoDoneRequest) {
+        maybeThrow()
+        todoList.replaceAll { if (it.id == id) it.copy(doneAt = req.doneAt) else it }
+    }
+    override suspend fun editTodo(id: String, req: EditTodoRequest) {
+        maybeThrow()
+        todoList.replaceAll { if (it.id == id) it.copy(text = req.text, isPublic = req.isPublic) else it }
+    }
+    override suspend fun deleteTodo(id: String) { maybeThrow(); todoList.removeAll { it.id == id } }
 }
