@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -102,6 +101,7 @@ import com.chore.tracker.data.PatchHouseholdRequest
 import com.chore.tracker.data.PatchTaskRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.SnoozeRequest
+import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.dirtiness
 import com.google.firebase.ktx.Firebase
@@ -141,6 +141,7 @@ fun HomeScreen(
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
+    val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -177,39 +178,6 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("Chores") },
                 actions = {
-                    IconButton(
-                        modifier = Modifier.testTag("inviteButton"),
-                        onClick = {
-                            scope.launch {
-                                runCatching { repo.api.createInvite() }
-                                    .onSuccess { inviteCode = it.code }
-                                    .onFailure { snackbarHost.showSnackbar("Invite failed: ${it.message}") }
-                            }
-                        },
-                    ) { Icon(Icons.Default.PersonAdd, contentDescription = "Invite") }
-                    IconButton(
-                        modifier = Modifier.testTag("vacationButton"),
-                        onClick = {
-                            scope.launch {
-                                val isPaused = state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()
-                                val newPause = if (isPaused) null else System.currentTimeMillis() + 365L * 86_400_000L
-                                runCatching { repo.api.patchHousehold(PatchHouseholdRequest(newPause)) }
-                                    .onSuccess { repo.refresh() }
-                                    .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
-                            }
-                        },
-                    ) {
-                        val isPaused = state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()
-                        if (isPaused) {
-                            Icon(
-                                Icons.Default.BeachAccess,
-                                contentDescription = "Vacation mode (active)",
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        } else {
-                            Icon(Icons.Default.BeachAccess, contentDescription = "Vacation mode")
-                        }
-                    }
                     IconButton(
                         modifier = Modifier.testTag("settingsButton"),
                         onClick = onOpenSettings,
@@ -275,6 +243,7 @@ fun HomeScreen(
                         } else {
                             TodayList(
                                 state = state,
+                                indicators = statusIndicators,
                                 onSwipeRight = { notesCompletionTask = it },
                                 onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
                                 onViewNotes = { viewingNotes = it },
@@ -297,6 +266,13 @@ fun HomeScreen(
                             selectAreasMode = selectAreasMode,
                             selectedCount = selectedAreaIds.size,
                             onLongPressRename = { renamingHousehold = true },
+                            onLongPressInvite = {
+                                scope.launch {
+                                    runCatching { repo.api.createInvite() }
+                                        .onSuccess { inviteCode = it.code }
+                                        .onFailure { snackbarHost.showSnackbar("Invite failed: ${it.message}") }
+                                }
+                            },
                             onLongPressSelectAreas = {
                                 selectAreasMode = true
                                 selectedAreaIds = emptySet()
@@ -385,6 +361,7 @@ fun HomeScreen(
                                     AreaCard(
                                         area = area,
                                         tasks = areaTasks,
+                                        indicators = statusIndicators,
                                         onAddTask = { showAddTaskFor = area },
                                         onAddFromLibrary = { libraryForArea = area },
                                         onEditArea = { editingArea = area },
@@ -807,6 +784,7 @@ private fun HouseholdHeader(
     selectedCount: Int,
     onLongPressRename: () -> Unit,
     onLongPressSelectAreas: () -> Unit,
+    onLongPressInvite: () -> Unit,
     onConfirmDeleteSelected: () -> Unit,
     onCancelSelection: () -> Unit,
 ) {
@@ -871,6 +849,11 @@ private fun HouseholdHeader(
                 text = { Text("Rename household") },
                 onClick = { menuExpanded = false; onLongPressRename() },
                 modifier = Modifier.testTag("householdMenuRename"),
+            )
+            DropdownMenuItem(
+                text = { Text("Invite member…") },
+                onClick = { menuExpanded = false; onLongPressInvite() },
+                modifier = Modifier.testTag("householdMenuInvite"),
             )
             DropdownMenuItem(
                 text = { Text("Select areas…") },
@@ -973,6 +956,7 @@ private fun TabHeader(
 @Composable
 private fun TodayList(
     state: com.chore.tracker.data.HouseholdState,
+    indicators: StatusIndicators,
     onSwipeRight: (Task) -> Unit,
     onSwipeLeft: (Task) -> Unit,
     onViewNotes: (Task) -> Unit,
@@ -1024,6 +1008,7 @@ private fun TodayList(
             TaskRow(
                 task = task,
                 areaName = areaNamesById[task.areaId],
+                indicators = indicators,
                 onTap = null,  // Today is read-only triage; edit lives on Household
                 onSwipeRight = { onSwipeRight(task) },
                 onSwipeLeft = { onSwipeLeft(task) },
@@ -1038,6 +1023,7 @@ private fun TodayList(
 private fun AreaCard(
     area: Area,
     tasks: List<Task>,
+    indicators: StatusIndicators,
     onAddTask: () -> Unit,
     onAddFromLibrary: () -> Unit,
     onEditArea: () -> Unit,
@@ -1156,6 +1142,7 @@ private fun AreaCard(
                     } else {
                         TaskRow(
                             task = task,
+                            indicators = indicators,
                             onTap = { onEditTask(task) },
                             onSwipeRight = { onSwipeRightTask(task) },
                             onSwipeLeft = { onSwipeLeftTask(task) },
@@ -1209,6 +1196,7 @@ private fun TaskRow(
     onTap: (() -> Unit)?,
     onSwipeRight: () -> Unit,
     onSwipeLeft: () -> Unit,
+    indicators: StatusIndicators = StatusIndicators(),
     onViewNotes: (() -> Unit)? = null,
     areaName: String? = null,
 ) {
@@ -1219,12 +1207,18 @@ private fun TaskRow(
     val startOfToday = (now / dayMs) * dayMs
     val startOfTomorrow = startOfToday + dayMs
 
+    val isOverdue = task.lastDoneAt == null || due < startOfToday
+    val isDueToday = !isOverdue && due < startOfTomorrow
     val statusColor = when {
-        task.lastDoneAt == null -> Color(0xFFD32F2F)
-        due < startOfToday -> Color(0xFFD32F2F)
-        due < startOfTomorrow -> Color(0xFFFBC02D)
+        isOverdue -> Color(0xFFD32F2F)
+        isDueToday -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
+    val statusOverride = when {
+        isOverdue -> indicators.overdue
+        isDueToday -> indicators.dueToday
+        else -> indicators.notDue
+    }.takeIf { it.isNotBlank() }
 
     val swipeState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -1287,13 +1281,21 @@ private fun TaskRow(
                     .padding(vertical = 10.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Status dot
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(statusColor, CircleShape)
-                        .testTag("statusDot:${task.name}"),
-                )
+                // Status indicator: colored dot by default, or user-chosen
+                // emoji/text override.
+                if (statusOverride != null) {
+                    Text(
+                        statusOverride,
+                        modifier = Modifier.testTag("statusDot:${task.name}"),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .background(statusColor, CircleShape)
+                            .testTag("statusDot:${task.name}"),
+                    )
+                }
                 Spacer(Modifier.size(12.dp))
                 // Title + tag row
                 Column(Modifier.weight(1f)) {

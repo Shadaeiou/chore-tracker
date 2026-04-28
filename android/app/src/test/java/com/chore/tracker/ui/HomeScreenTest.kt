@@ -141,12 +141,24 @@ class HomeScreenTest {
         compose.onNodeWithTag("editTaskDialog").assertIsDisplayed()
     }
 
-    @Test fun `tapping invite shows the code returned by the api`() {
-        val fake = FakeApi().apply { inviteCode = "JOIN-ABCDEF" }
+    @Test fun `invite menu shows the code returned by the api`() {
+        // Invite moved from a toolbar icon to the household long-press menu.
+        val fake = FakeApi().apply {
+            inviteCode = "JOIN-ABCDEF"
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+        }
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        compose.onNodeWithTag("inviteButton").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("householdHeader").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("householdHeader").performTouchInput { longClick() }
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("householdMenuInvite").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("householdMenuInvite").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("inviteCodeText").fetchSemanticsNodes().isNotEmpty()
         }
