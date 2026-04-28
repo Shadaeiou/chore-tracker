@@ -1334,13 +1334,17 @@ describe("retroactive completion (POST /api/tasks/:id/complete with at)", () => 
     expect(res.status).toBe(400);
   });
 
-  it("rejects timestamps before task creation", async () => {
+  it("accepts timestamps before task creation (manual backdating)", async () => {
+    // Users may add a task to the tracker after they've already done the
+    // chore — letting them backdate the first completion lets the timer
+    // start from the real last-done date rather than the date they
+    // happened to add the row.
     const { token, taskId } = await seedTask();
     const res = await api(`/api/tasks/${taskId}/complete`, {
       method: "POST", token,
-      body: JSON.stringify({ at: 1000 }), // year 1970
+      body: JSON.stringify({ at: Date.now() - 7 * 86_400_000 }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
   });
 
   it("doesn't overwrite a newer last_done_at with an older retroactive completion", async () => {

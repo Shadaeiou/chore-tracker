@@ -519,7 +519,6 @@ app.post("/api/tasks/:id/complete", async (c) => {
   let completedAt = realNow;
   if (body.at !== undefined && body.at !== null) {
     if (body.at > realNow) throw new HTTPException(400, { message: "completion time cannot be in the future" });
-    if (body.at < task.created_at) throw new HTTPException(400, { message: "completion time predates task creation" });
     completedAt = body.at;
   }
   const completionId = newId();

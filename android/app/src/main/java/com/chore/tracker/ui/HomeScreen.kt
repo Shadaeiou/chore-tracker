@@ -1135,6 +1135,7 @@ private fun AreaCard(
                             onSwipeRight = { onSwipeRightTask(task) },
                             onSwipeLeft = { onSwipeLeftTask(task) },
                         )
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
@@ -1437,14 +1438,18 @@ private fun CompleteTaskDialog(
 ) {
     val now = remember { System.currentTimeMillis() }
     val dayMs = 86_400_000L
-    val createdDay = (task.createdAt / dayMs) * dayMs
     val todayDay = (now / dayMs) * dayMs
+    // Allow backdating up to a year — useful for tasks added retroactively to
+    // an app that's been used for a while ("I scrubbed the tub last weekend,
+    // adding it to the tracker now"). The backend no longer rejects "before
+    // task creation" for the same reason.
+    val earliestDay = todayDay - 365L * dayMs
 
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = todayDay,
         selectableDates = object : SelectableDates {
             override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                utcTimeMillis in createdDay..todayDay
+                utcTimeMillis in earliestDay..todayDay
         },
     )
     var showDatePicker by remember { mutableStateOf(false) }
