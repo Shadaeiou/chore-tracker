@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -603,7 +604,7 @@ fun HomeScreen(
             areaNameForLibrary = area.name,
             repo = repo,
             onDismiss = { showAddTaskFor = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, _ ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, _, onDemand ->
                 showAddTaskFor = null
                 scope.launch {
                     runCatching {
@@ -616,6 +617,7 @@ fun HomeScreen(
                                 autoRotate = autoRotate,
                                 effortPoints = effortPoints,
                                 notes = notes,
+                                onDemand = onDemand,
                                 // Start the indicator green: treat the task as just done.
                                 // Avoids the bad UX where every newly added task immediately
                                 // shows as overdue.
@@ -639,7 +641,7 @@ fun HomeScreen(
             areas = state.areas,
             confirmLabel = "Save",
             onDismiss = { editingTask = null },
-            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, areaId ->
+            onConfirm = { name, freq, assignedTo, autoRotate, effortPoints, notes, areaId, onDemand ->
                 editingTask = null
                 scope.launch {
                     runCatching {
@@ -655,6 +657,7 @@ fun HomeScreen(
                                 // user can clear by emptying the field, vs null = "leave alone".
                                 notes = notes ?: "",
                                 areaId = areaId,
+                                onDemand = onDemand,
                             ),
                         )
                     }
@@ -1171,9 +1174,15 @@ private fun TodayList(
             .filter { it.snoozedUntil == null || it.snoozedUntil <= now }
             .filter { task -> task.assignedTo == null || task.assignedTo == me }
             .filter { task ->
-                val due = (task.lastDoneAt ?: 0L) +
-                    task.frequencyDays.toLong() * 86_400_000L
-                task.lastDoneAt == null || due < startOfTomorrow
+                if (task.onDemand) {
+                    // On-demand tasks have no schedule — show only when explicitly
+                    // assigned to me (i.e. it's my turn).
+                    task.assignedTo == me
+                } else {
+                    val due = (task.lastDoneAt ?: 0L) +
+                        task.frequencyDays.toLong() * 86_400_000L
+                    task.lastDoneAt == null || due < startOfTomorrow
+                }
             }
             .sortedByDescending { it.dirtiness(now) }
     }
@@ -1491,9 +1500,18 @@ private fun TaskRow(
                     .padding(vertical = 10.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Status indicator: colored dot by default, or user-chosen
-                // emoji/text override.
-                if (statusOverride != null) {
+                // Status indicator: on-demand rotation icon, user-chosen
+                // emoji/text override, or the default colored dot.
+                if (task.onDemand) {
+                    Icon(
+                        Icons.Default.Loop,
+                        contentDescription = "On demand",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .testTag("statusDot:${task.name}"),
+                    )
+                } else if (statusOverride != null) {
                     Text(
                         statusOverride,
                         modifier = Modifier.testTag("statusDot:${task.name}"),
@@ -1521,7 +1539,8 @@ private fun TaskRow(
                     } else {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             areaName?.let { TagChip(it) }
-                            TagChip("${task.frequencyDays}d")
+                            if (task.onDemand) TagChip("on demand")
+                            else TagChip("${task.frequencyDays}d")
                             task.assignedToName?.let { TagChip(it) }
                             if (task.effortPoints > 1) {
                                 TagChip("E:${task.effortPoints}")
@@ -1965,7 +1984,7 @@ private fun TaskFormDialog(
     repo: Repo? = null,
     areas: List<Area> = emptyList(),
     onDismiss: () -> Unit,
-    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int, notes: String?, areaId: String?) -> Unit,
+    onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int, notes: String?, areaId: String?, onDemand: Boolean) -> Unit,
 ) {
     var name by remember { mutableStateOf(initialTask?.name ?: "") }
     var freq by remember { mutableStateOf(initialTask?.frequencyDays?.toString() ?: "7") }
@@ -1983,6 +2002,7 @@ private fun TaskFormDialog(
     // unassigned.
     var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
     if (selectedMember == null && autoRotate) autoRotate = false
+    var onDemand by remember { mutableStateOf(initialTask?.onDemand ?: false) }
     var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
     var notes by remember { mutableStateOf(initialTask?.notes ?: "") }
     val initialArea = initialTask?.let { t -> areas.firstOrNull { it.id == t.areaId } }
@@ -2041,12 +2061,32 @@ private fun TaskFormDialog(
                         }
                     }
                 }
-                OutlinedTextField(
-                    freq,
-                    { freq = it.filter { c -> c.isDigit() } },
-                    label = { Text("Every N days") },
-                    modifier = Modifier.testTag("taskFreqField"),
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("On demand")
+                        Text(
+                            "No schedule — rotates when completed",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = onDemand,
+                        onCheckedChange = { onDemand = it },
+                        modifier = Modifier.testTag("onDemandToggle"),
+                    )
+                }
+                if (!onDemand) {
+                    OutlinedTextField(
+                        freq,
+                        { freq = it.filter { c -> c.isDigit() } },
+                        label = { Text("Every N days") },
+                        modifier = Modifier.testTag("taskFreqField"),
+                    )
+                }
                 if (members.isNotEmpty()) {
                     ExposedDropdownMenuBox(
                         expanded = assigneeExpanded,
@@ -2130,17 +2170,18 @@ private fun TaskFormDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = name.isNotBlank() && (freq.toIntOrNull() ?: 0) > 0,
+                enabled = name.isNotBlank() && (onDemand || (freq.toIntOrNull() ?: 0) > 0),
                 modifier = Modifier.testTag("addTaskConfirm"),
                 onClick = {
                     onConfirm(
                         name.trim(),
-                        freq.toInt(),
+                        if (onDemand) (freq.toIntOrNull() ?: 1) else freq.toInt(),
                         selectedMember?.id,
                         autoRotate,
                         effortPoints.roundToInt(),
                         notes.trim().ifBlank { null },
                         selectedArea?.id?.takeIf { it != initialTask?.areaId },
+                        onDemand,
                     )
                 },
             ) { Text(confirmLabel) }

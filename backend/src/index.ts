@@ -448,6 +448,7 @@ app.get("/api/tasks", async (c) => {
             t.auto_rotate    AS autoRotate,
             t.effort_points  AS effortPoints,
             t.snoozed_until  AS snoozedUntil,
+            t.on_demand      AS onDemand,
             t.notes          AS notes,
             u.display_name   AS lastDoneBy,
             ua.display_name  AS assignedToName
@@ -466,6 +467,7 @@ app.get("/api/tasks", async (c) => {
     .bind(hh)
     .all<{
       autoRotate: number;
+      onDemand: number;
       snoozedUntil: number | null;
       lastDoneAt: number | null;
       frequencyDays: number;
@@ -473,8 +475,9 @@ app.get("/api/tasks", async (c) => {
 
   return c.json(results.map((r) => {
     const isSnoozed = r.snoozedUntil != null && r.snoozedUntil > now;
+    const onDemand = r.onDemand !== 0;
     let dueness: number;
-    if (isPaused || isSnoozed) {
+    if (onDemand || isPaused || isSnoozed) {
       dueness = 0;
     } else if (r.lastDoneAt == null) {
       dueness = 1.0;
@@ -485,6 +488,7 @@ app.get("/api/tasks", async (c) => {
     return {
       ...r,
       autoRotate: r.autoRotate !== 0,
+      onDemand,
       dueness,
     };
   }));
@@ -502,6 +506,7 @@ app.post("/api/tasks", async (c) => {
     templateId?: string;
     lastDoneAt?: number | null;
     notes?: string | null;
+    onDemand?: boolean;
   }>();
   if (!body.areaId) throw new HTTPException(400, { message: "areaId required" });
 
@@ -520,7 +525,11 @@ app.post("/api/tasks", async (c) => {
     body.effortPoints = body.effortPoints ?? tmpl.suggested_effort;
   }
 
-  if (!body.name || !body.frequencyDays || body.frequencyDays <= 0)
+  const onDemand = body.onDemand === true;
+  // On-demand tasks have no schedule, so frequency is irrelevant; we still
+  // store a non-null value to keep the column NOT NULL.
+  const frequencyDays = onDemand ? (body.frequencyDays ?? 1) : body.frequencyDays;
+  if (!body.name || !frequencyDays || frequencyDays <= 0)
     throw new HTTPException(400, { message: "missing fields" });
 
   const area = await c.env.DB.prepare(
@@ -538,20 +547,21 @@ app.post("/api/tasks", async (c) => {
   const lastDoneAt = body.lastDoneAt ?? null;
   const notes = body.notes ?? null;
   await c.env.DB.prepare(
-    `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, notes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, notes, on_demand, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, notes, now)
+    .bind(id, body.areaId, body.name, frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, notes, onDemand ? 1 : 0, now)
     .run();
   await fanOutRefresh(c, hh, sub);
   return c.json({
     id,
     areaId: body.areaId,
     name: body.name,
-    frequencyDays: body.frequencyDays,
+    frequencyDays,
     assignedTo,
     assignedToName: null,
     autoRotate: body.autoRotate ?? false,
+    onDemand,
     effortPoints,
     lastDoneAt,
     lastDoneBy: null,
@@ -700,6 +710,7 @@ app.patch("/api/tasks/:id", async (c) => {
     effortPoints?: number;
     notes?: string | null;
     areaId?: string;
+    onDemand?: boolean;
   }>();
 
   const task = await c.env.DB.prepare(
@@ -734,6 +745,7 @@ app.patch("/api/tasks/:id", async (c) => {
     sets.push("notes = ?");
     bindings.push(trimmed ? trimmed : null);
   }
+  if (body.onDemand !== undefined) { sets.push("on_demand = ?"); bindings.push(body.onDemand ? 1 : 0); }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
 
   bindings.push(id);

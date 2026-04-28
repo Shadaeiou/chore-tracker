@@ -49,6 +49,7 @@ data class Task(
     val snoozedUntil: Long? = null,
     val dueness: Double? = null,
     val notes: String? = null,
+    val onDemand: Boolean = false,
 )
 
 @Serializable
@@ -62,6 +63,7 @@ data class CreateTaskRequest(
     val templateId: String? = null,
     val lastDoneAt: Long? = null,
     val notes: String? = null,
+    val onDemand: Boolean = false,
 )
 
 @Serializable
@@ -85,6 +87,7 @@ data class PatchTaskRequest(
     val effortPoints: Int? = null,
     val notes: String? = null,
     val areaId: String? = null,
+    val onDemand: Boolean? = null,
 )
 
 @Serializable
@@ -173,8 +176,10 @@ data class UserAvatarResponse(
 data class HouseholdResponse(val household: Household, val members: List<Member>)
 
 /** Computed dirtiness 0.0 (just done) → 1.0 (due) → >1.0 (overdue).
- * Server-computed `dueness` wins when present (it accounts for pause/snooze). */
+ * Server-computed `dueness` wins when present (it accounts for pause/snooze).
+ * On-demand tasks have no schedule, so they're always considered "not due". */
 fun Task.dirtiness(now: Long = System.currentTimeMillis()): Double {
+    if (onDemand) return 0.0
     dueness?.let { return it }
     val last = lastDoneAt ?: return 1.0
     val window = frequencyDays.toLong() * 86_400_000L

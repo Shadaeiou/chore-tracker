@@ -234,6 +234,25 @@ describe("areas + tasks lifecycle", () => {
     expect(res.status).toBe(404);
   });
 
+  it("creates an on-demand task without requiring a frequency", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token, body: JSON.stringify({ name: "Nursery" }),
+    })).json()) as { id: string };
+    const created = await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Empty diaper trash", onDemand: true }),
+    });
+    expect(created.status).toBe(200);
+    const tasks = (await (await api("/api/tasks", { token: auth.token })).json()) as Array<{
+      name: string; onDemand: boolean; dueness: number;
+    }>;
+    const t = tasks.find((x) => x.name === "Empty diaper trash")!;
+    expect(t.onDemand).toBe(true);
+    // On-demand tasks never look "due" — they have no schedule.
+    expect(t.dueness).toBe(0);
+  });
+
   it("deleting an area cascades its tasks", async () => {
     const auth = await register();
     const area = (await (await api("/api/areas", {
