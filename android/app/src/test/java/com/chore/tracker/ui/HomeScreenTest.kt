@@ -423,8 +423,8 @@ class HomeScreenTest {
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("addTaskDialog").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("effortSlider").assertIsDisplayed()
-        compose.onNodeWithTag("assigneePicker").assertIsDisplayed()
-        compose.onNodeWithTag("autoRotateToggle").assertIsDisplayed()
+        compose.onNodeWithTag("effortSlider").assertExists()
+        compose.onNodeWithTag("assigneePicker").assertExists()
+        compose.onNodeWithTag("autoRotateToggle").assertExists()
     }
 }

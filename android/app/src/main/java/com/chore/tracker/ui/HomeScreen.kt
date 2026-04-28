@@ -11,6 +11,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
@@ -346,10 +349,7 @@ fun HomeScreen(
 
     // ── Add area ──────────────────────────────────────────────────────────────
     if (showAddArea) {
-        TextDialog(
-            title = "New area",
-            label = "e.g. Kitchen",
-            initialValue = "",
+        AddAreaDialog(
             onDismiss = { showAddArea = false },
             onConfirm = { name ->
                 showAddArea = false
@@ -410,6 +410,8 @@ fun HomeScreen(
         TaskFormDialog(
             title = "New task in ${area.name}",
             members = state.members,
+            areaNameForLibrary = area.name,
+            repo = repo,
             onDismiss = { showAddTaskFor = null },
             onConfirm = { name, freq, assignedTo, autoRotate, effortPoints ->
                 showAddTaskFor = null
@@ -690,8 +692,16 @@ private fun TaskRow(
                         color = MaterialTheme.colorScheme.tertiary,
                     )
                 } else {
+                    val statusText = when {
+                        ratio > 1.0f -> {
+                            val days = ((ratio - 1.0f) * task.frequencyDays).toLong()
+                            if (days <= 0) "due now"
+                            else "$days day${if (days == 1L) "" else "s"} overdue"
+                        }
+                        else -> "${(ratio * 100).toInt()}%"
+                    }
                     Text(
-                        "every ${task.frequencyDays}d · ${(ratio * 100).toInt()}% · $attribution",
+                        "every ${task.frequencyDays}d · $statusText · $attribution",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -771,6 +781,52 @@ private fun TextDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AddAreaDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val suggestions = remember {
+        listOf("Kitchen", "Bathroom", "Bedroom", "Living room", "Laundry",
+            "Outdoor", "Garage", "Pets", "Kids", "Office")
+    }
+    var value by remember { mutableStateOf("") }
+    AlertDialog(
+        modifier = Modifier.testTag("addAreaDialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("New area") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Pick a common room or type your own:", style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    suggestions.forEach { name ->
+                        AssistChip(
+                            onClick = { value = name },
+                            label = { Text(name) },
+                            modifier = Modifier.testTag("areaSuggestion:$name"),
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value,
+                    { value = it },
+                    label = { Text("Area name") },
+                    modifier = Modifier.fillMaxWidth().testTag("textDialogField"),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = value.isNotBlank(),
+                modifier = Modifier.testTag("textDialogConfirm"),
+                onClick = { onConfirm(value.trim()) },
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RetroactiveDoneDialog(
@@ -809,6 +865,8 @@ private fun TaskFormDialog(
     members: List<Member>,
     initialTask: Task? = null,
     confirmLabel: String = "Add",
+    areaNameForLibrary: String? = null,
+    repo: Repo? = null,
     onDismiss: () -> Unit,
     onConfirm: (name: String, frequencyDays: Int, assignedTo: String?, autoRotate: Boolean, effortPoints: Int) -> Unit,
 ) {
@@ -820,6 +878,7 @@ private fun TaskFormDialog(
     var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
     var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
     var assigneeExpanded by remember { mutableStateOf(false) }
+    var showLibrary by remember { mutableStateOf(false) }
 
     val testDialogTag = if (initialTask == null) "addTaskDialog" else "editTaskDialog"
 
@@ -829,6 +888,12 @@ private fun TaskFormDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (initialTask == null && repo != null) {
+                    TextButton(
+                        onClick = { showLibrary = true },
+                        modifier = Modifier.testTag("browseLibraryButton"),
+                    ) { Text("Browse template library") }
+                }
                 OutlinedTextField(
                     name,
                     { name = it },
@@ -915,5 +980,77 @@ private fun TaskFormDialog(
             ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+
+    if (showLibrary && repo != null) {
+        TemplateLibraryPicker(
+            repo = repo,
+            preferredArea = areaNameForLibrary?.lowercase(),
+            onDismiss = { showLibrary = false },
+            onPick = { tmpl ->
+                name = tmpl.name
+                freq = tmpl.suggestedFrequencyDays.toString()
+                effortPoints = tmpl.suggestedEffort.toFloat()
+                showLibrary = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun TemplateLibraryPicker(
+    repo: Repo,
+    preferredArea: String?,
+    onDismiss: () -> Unit,
+    onPick: (com.chore.tracker.data.TaskTemplate) -> Unit,
+) {
+    var templates by remember { mutableStateOf<List<com.chore.tracker.data.TaskTemplate>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { repo.api.taskTemplates() }
+            .onSuccess { templates = it }
+            .onFailure { error = it.message }
+    }
+    val ordered = remember(templates, preferredArea) {
+        if (preferredArea == null) templates
+        else templates.sortedBy { if (it.suggestedArea == preferredArea) 0 else 1 }
+    }
+    AlertDialog(
+        modifier = Modifier.testTag("libraryPicker"),
+        onDismissRequest = onDismiss,
+        title = { Text("Pick a template") },
+        text = {
+            if (error != null) {
+                Text("Couldn't load: $error", color = MaterialTheme.colorScheme.error)
+            } else if (templates.isEmpty()) {
+                Text("Loading…")
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(ordered, key = { it.id }) { tmpl ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .testTag("libraryTemplate:${tmpl.id}"),
+                        ) {
+                            TextButton(
+                                onClick = { onPick(tmpl) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(tmpl.name)
+                                    Text(
+                                        "${tmpl.suggestedArea} · every ${tmpl.suggestedFrequencyDays}d · effort ${tmpl.suggestedEffort}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
