@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
@@ -540,20 +541,78 @@ fun HomeScreen(
 
     // ── Invite code ───────────────────────────────────────────────────────────
     inviteCode?.let { code ->
-        AlertDialog(
-            modifier = Modifier.testTag("inviteDialog"),
-            onDismissRequest = { inviteCode = null },
-            title = { Text("Invite to your household") },
-            text = {
-                Column {
-                    Text("Share this code. It expires in 7 days.")
-                    Spacer(Modifier.height(12.dp))
-                    Text(code, modifier = Modifier.testTag("inviteCodeText"))
-                }
-            },
-            confirmButton = { TextButton(onClick = { inviteCode = null }) { Text("Done") } },
+        InviteCodeDialog(
+            code = code,
+            snackbarHost = snackbarHost,
+            scope = scope,
+            onDismiss = { inviteCode = null },
         )
     }
+}
+
+@Composable
+private fun InviteCodeDialog(
+    code: String,
+    snackbarHost: SnackbarHostState,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    AlertDialog(
+        modifier = Modifier.testTag("inviteDialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("Invite to your household") },
+        text = {
+            Column {
+                Text("Share this code with someone you trust. It expires in 7 days.")
+                Spacer(Modifier.height(16.dp))
+                // Big tappable code box — long-press to select on most keyboards too,
+                // but the explicit Copy button is the primary affordance.
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("inviteCodeText"),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Text(
+                        code,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 16.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f).testTag("inviteCopyButton"),
+                        onClick = {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(code))
+                            scope.launch { snackbarHost.showSnackbar("Code copied") }
+                        },
+                    ) { Text("Copy") }
+                    androidx.compose.material3.OutlinedButton(
+                        modifier = Modifier.weight(1f).testTag("inviteShareButton"),
+                        onClick = {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    android.content.Intent.EXTRA_TEXT,
+                                    "Join my household on Chore Tracker with this code: $code",
+                                )
+                            }
+                            context.startActivity(android.content.Intent.createChooser(intent, "Share invite"))
+                        },
+                    ) { Text("Share…") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 /** Shared header for Plan and Areas tabs: error message + vacation banner. */
