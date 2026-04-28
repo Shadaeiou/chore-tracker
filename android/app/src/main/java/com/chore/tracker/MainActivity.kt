@@ -54,7 +54,16 @@ private fun Root(app: ChoreApp) {
             )
         }
         composable("settings") {
-            SettingsScreen(session = app.session, onBack = { nav.popBackStack() }, repo = app.repo)
+            SettingsScreen(
+                session = app.session,
+                onBack = { nav.popBackStack() },
+                repo = app.repo,
+                onSignOut = {
+                    nav.navigate("auth") {
+                        popUpTo("home") { inclusive = true }
+                    }
+                },
+            )
         }
     }
 }

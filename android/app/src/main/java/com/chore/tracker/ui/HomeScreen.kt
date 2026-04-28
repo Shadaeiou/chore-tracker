@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,7 +29,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -58,8 +59,10 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -128,9 +131,8 @@ fun HomeScreen(
     var selectedAreaIds by remember { mutableStateOf(setOf<String>()) }
     var householdSearchQuery by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
-    var deletingTask by remember { mutableStateOf<Task?>(null) }
+    // Swipe-left opens snooze/delete; swipe-right opens the unified complete dialog.
     var snoozingTask by remember { mutableStateOf<Task?>(null) }
-    var retroactiveTask by remember { mutableStateOf<Task?>(null) }
     var notesCompletionTask by remember { mutableStateOf<Task?>(null) }
     var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
@@ -210,9 +212,6 @@ fun HomeScreen(
                         modifier = Modifier.testTag("settingsButton"),
                         onClick = onOpenSettings,
                     ) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
-                    IconButton(onClick = {
-                        scope.launch { repo.logout(); onSignOut() }
-                    }) { Icon(Icons.Default.Logout, contentDescription = "Sign out") }
                 },
             )
         },
@@ -249,26 +248,6 @@ fun HomeScreen(
                     text = { Text("Activity") },
                 )
             }
-            // Shared callback used by Plan and Areas tabs.
-            val onCompleteTask: (Task) -> Unit = { task ->
-                scope.launch {
-                    runCatching { repo.api.completeTask(task.id) }
-                        .onSuccess {
-                            repo.refresh()
-                            val result = snackbarHost.showSnackbar(
-                                message = "Marked done",
-                                actionLabel = "Undo",
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                runCatching { repo.api.undoLastCompletion(task.id) }
-                                    .onSuccess { repo.refresh() }
-                                    .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
-                            }
-                        }
-                        .onFailure { snackbarHost.showSnackbar("Failed to complete: ${it.message}") }
-                }
-            }
-
             when (selectedTab) {
                 // ── Today tab: tasks due today or earlier, no workload here ──
                 0 -> PullToRefreshBox(
@@ -294,12 +273,9 @@ fun HomeScreen(
                         } else {
                             TodayList(
                                 state = state,
-                                onComplete = onCompleteTask,
                                 onEditTask = { editingTask = it },
-                                onDeleteTask = { deletingTask = it },
-                                onCompleteWithNotes = { notesCompletionTask = it },
-                                onSnoozeTask = { snoozingTask = it },
-                                onMarkDoneAt = { retroactiveTask = it },
+                                onSwipeRight = { notesCompletionTask = it },
+                                onSwipeLeft = { snoozingTask = it },
                             )
                         }
                     }
@@ -413,7 +389,6 @@ fun HomeScreen(
                                         onCopyArea = { copyingArea = area },
                                         onDeleteArea = { deletingArea = area },
                                         onEditTask = { task -> editingTask = task },
-                                        onDeleteTask = { task -> deletingTask = task },
                                         onMassDeleteTasks = { taskIds ->
                                             scope.launch {
                                                 var failures = 0
@@ -429,10 +404,8 @@ fun HomeScreen(
                                                 }
                                             }
                                         },
-                                        onSnoozeTask = { task -> snoozingTask = task },
-                                        onMarkDoneAt = { task -> retroactiveTask = task },
-                                        onCompleteWithNotes = { task -> notesCompletionTask = task },
-                                        onComplete = onCompleteTask,
+                                        onSwipeRightTask = { task -> notesCompletionTask = task },
+                                        onSwipeLeftTask = { task -> snoozingTask = task },
                                     )
                                     Spacer(Modifier.height(8.dp))
                                 }
@@ -672,87 +645,50 @@ fun HomeScreen(
         )
     }
 
-    // ── Delete task ───────────────────────────────────────────────────────────
-    deletingTask?.let { task ->
-        AlertDialog(
-            modifier = Modifier.testTag("deleteTaskDialog:${task.name}"),
-            onDismissRequest = { deletingTask = null },
-            title = { Text("Delete ${task.name}?") },
-            text = { Text("This cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    modifier = Modifier.testTag("deleteTaskConfirm"),
-                    onClick = {
-                        deletingTask = null
-                        scope.launch {
-                            runCatching { repo.api.deleteTask(task.id) }
-                                .onSuccess { repo.refresh() }
-                                .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
-                        }
-                    },
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { deletingTask = null }) { Text("Cancel") } },
-        )
-    }
-
-    // ── Snooze task ───────────────────────────────────────────────────────────
+    // ── Snooze or delete (swipe-left) ─────────────────────────────────────────
     snoozingTask?.let { task ->
-        AlertDialog(
-            modifier = Modifier.testTag("snoozeDialog:${task.name}"),
-            onDismissRequest = { snoozingTask = null },
-            title = { Text("Snooze \"${task.name}\"") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(1L to "1 day", 3L to "3 days", 7L to "1 week").forEach { (days, label) ->
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth().testTag("snoozeOption:$days"),
-                            onClick = {
-                                snoozingTask = null
-                                scope.launch {
-                                    val until = System.currentTimeMillis() + days * 86_400_000L
-                                    runCatching { repo.api.snoozeTask(task.id, SnoozeRequest(until)) }
-                                        .onSuccess { repo.refresh() }
-                                        .onFailure { snackbarHost.showSnackbar("Snooze failed: ${it.message}") }
-                                }
-                            },
-                        ) { Text(label) }
-                    }
+        SnoozeOrDeleteDialog(
+            task = task,
+            onDismiss = { snoozingTask = null },
+            onSnooze = { until ->
+                snoozingTask = null
+                scope.launch {
+                    runCatching { repo.api.snoozeTask(task.id, SnoozeRequest(until)) }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Snooze failed: ${it.message}") }
                 }
             },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { snoozingTask = null }) { Text("Cancel") } },
+            onDelete = {
+                snoozingTask = null
+                scope.launch {
+                    runCatching { repo.api.deleteTask(task.id) }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
+                }
+            },
         )
     }
 
-    // ── Mark done with notes ──────────────────────────────────────────────────
+    // ── Complete (swipe-right): unified date + notes + assignee picker ────────
     notesCompletionTask?.let { task ->
-        CompleteWithNotesDialog(
+        CompleteTaskDialog(
             task = task,
+            members = state.members,
+            currentUserId = state.currentUserId,
             onDismiss = { notesCompletionTask = null },
-            onConfirm = { notes ->
+            onConfirm = { at, notes, completedBy ->
                 notesCompletionTask = null
                 scope.launch {
-                    runCatching { repo.api.completeTask(task.id, com.chore.tracker.data.CompleteRequest(notes = notes)) }
-                        .onSuccess {
-                            repo.refresh()
-                            snackbarHost.showSnackbar("Marked done")
-                        }
-                        .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
-                }
-            },
-        )
-    }
-
-    // ── Mark done at... (retroactive completion) ──────────────────────────────
-    retroactiveTask?.let { task ->
-        RetroactiveDoneDialog(
-            task = task,
-            onDismiss = { retroactiveTask = null },
-            onConfirm = { ts ->
-                retroactiveTask = null
-                scope.launch {
-                    runCatching { repo.api.completeTask(task.id, CompleteRequest(at = ts)) }
+                    runCatching {
+                        repo.api.completeTask(
+                            task.id,
+                            CompleteRequest(
+                                at = at,
+                                notes = notes.ifBlank { null },
+                                completedBy = completedBy,
+                            ),
+                        )
+                    }
                         .onSuccess { repo.refresh() }
                         .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
                 }
@@ -1013,12 +949,9 @@ private fun TabHeader(
 @Composable
 private fun TodayList(
     state: com.chore.tracker.data.HouseholdState,
-    onComplete: (Task) -> Unit,
     onEditTask: (Task) -> Unit,
-    onDeleteTask: (Task) -> Unit,
-    onSnoozeTask: (Task) -> Unit,
-    onMarkDoneAt: (Task) -> Unit,
-    onCompleteWithNotes: (Task) -> Unit,
+    onSwipeRight: (Task) -> Unit,
+    onSwipeLeft: (Task) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     val startOfTomorrow = remember(now) {
@@ -1032,12 +965,15 @@ private fun TodayList(
         }
         cal.timeInMillis
     }
-    // A task shows if its due date is before tomorrow. Snoozed and paused tasks
-    // are hidden (paused household → empty list, banner explains why).
-    val visibleTasks = remember(state.tasks, state.pausedUntil) {
+    // A task shows if its due date is before tomorrow AND it's either assigned
+    // to the current user or unassigned. Snoozed and paused tasks are hidden
+    // (paused household → empty list, banner explains why).
+    val me = state.currentUserId
+    val visibleTasks = remember(state.tasks, state.pausedUntil, me) {
         if (state.pausedUntil != null && state.pausedUntil > now) return@remember emptyList()
         state.tasks
             .filter { it.snoozedUntil == null || it.snoozedUntil <= now }
+            .filter { task -> task.assignedTo == null || task.assignedTo == me }
             .filter { task ->
                 val due = (task.lastDoneAt ?: 0L) +
                     task.frequencyDays.toLong() * 86_400_000L
@@ -1064,12 +1000,9 @@ private fun TodayList(
             TaskRow(
                 task = task,
                 areaName = areaNamesById[task.areaId],
-                onComplete = { onComplete(task) },
-                onEdit = { onEditTask(task) },
-                onDelete = { onDeleteTask(task) },
-                onSnooze = { onSnoozeTask(task) },
-                onMarkDoneAt = { onMarkDoneAt(task) },
-                onCompleteWithNotes = { onCompleteWithNotes(task) },
+                onTap = { onEditTask(task) },
+                onSwipeRight = { onSwipeRight(task) },
+                onSwipeLeft = { onSwipeLeft(task) },
             )
         }
     }
@@ -1086,12 +1019,9 @@ private fun AreaCard(
     onCopyArea: () -> Unit,
     onDeleteArea: () -> Unit,
     onEditTask: (Task) -> Unit,
-    onDeleteTask: (Task) -> Unit,
     onMassDeleteTasks: (List<String>) -> Unit,
-    onSnoozeTask: (Task) -> Unit,
-    onMarkDoneAt: (Task) -> Unit,
-    onCompleteWithNotes: (Task) -> Unit,
-    onComplete: (Task) -> Unit,
+    onSwipeRightTask: (Task) -> Unit,
+    onSwipeLeftTask: (Task) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var selectionMode by remember { mutableStateOf(false) }
@@ -1201,12 +1131,9 @@ private fun AreaCard(
                     } else {
                         TaskRow(
                             task = task,
-                            onComplete = { onComplete(task) },
-                            onEdit = { onEditTask(task) },
-                            onDelete = { onDeleteTask(task) },
-                            onSnooze = { onSnoozeTask(task) },
-                            onMarkDoneAt = { onMarkDoneAt(task) },
-                            onCompleteWithNotes = { onCompleteWithNotes(task) },
+                            onTap = { onEditTask(task) },
+                            onSwipeRight = { onSwipeRightTask(task) },
+                            onSwipeLeft = { onSwipeLeftTask(task) },
                         )
                     }
                 }
@@ -1249,16 +1176,13 @@ private fun SelectableTaskRow(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskRow(
     task: Task,
-    onComplete: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onSnooze: () -> Unit,
-    onMarkDoneAt: () -> Unit,
-    onCompleteWithNotes: () -> Unit,
+    onTap: () -> Unit,
+    onSwipeRight: () -> Unit,
+    onSwipeLeft: () -> Unit,
     areaName: String? = null,
 ) {
     val ratio = task.dirtiness().toFloat()
@@ -1268,18 +1192,59 @@ private fun TaskRow(
         ratio >= 0.33f -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
-    var menuExpanded by remember { mutableStateOf(false) }
 
-    Box {
+    val swipeState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> { onSwipeRight(); false }
+                SwipeToDismissBoxValue.EndToStart -> { onSwipeLeft(); false }
+                SwipeToDismissBoxValue.Settled -> false
+            }
+        },
+        // Require ~30% of the row width before a swipe counts as triggered.
+        positionalThreshold = { distance -> distance * 0.3f },
+    )
+
+    SwipeToDismissBox(
+        state = swipeState,
+        modifier = Modifier.testTag("taskRow:${task.name}"),
+        backgroundContent = {
+            val direction = swipeState.dismissDirection
+            val bg = when (direction) {
+                SwipeToDismissBoxValue.StartToEnd -> Color(0xFF388E3C)
+                SwipeToDismissBoxValue.EndToStart -> Color(0xFFE65100)
+                else -> Color.Transparent
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(bg)
+                    .padding(horizontal = 20.dp),
+            ) {
+                when (direction) {
+                    SwipeToDismissBoxValue.StartToEnd -> Icon(
+                        Icons.Default.Check,
+                        contentDescription = "Complete",
+                        tint = Color.White,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                    SwipeToDismissBoxValue.EndToStart -> Icon(
+                        Icons.Default.MoreHoriz,
+                        contentDescription = "Snooze or delete",
+                        tint = Color.White,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
+                    else -> {}
+                }
+            }
+        },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = { menuExpanded = true },
-                )
-                .testTag("taskRow:${task.name}"),
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(onClick = onTap)
+                .padding(vertical = 6.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -1350,49 +1315,6 @@ private fun TaskRow(
                     )
                 }
             }
-            IconButton(
-                modifier = Modifier.testTag("completeButton:${task.name}"),
-                onClick = onComplete,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .background(color, shape = CircleShape)
-                        .padding(6.dp),
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = "Done", tint = Color.White)
-                }
-            }
-        }
-        DropdownMenu(
-            expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false },
-            modifier = Modifier.testTag("taskMenu:${task.name}"),
-        ) {
-            DropdownMenuItem(
-                text = { Text("Edit") },
-                onClick = { menuExpanded = false; onEdit() },
-                modifier = Modifier.testTag("taskMenuEdit:${task.name}"),
-            )
-            DropdownMenuItem(
-                text = { Text("Snooze…") },
-                onClick = { menuExpanded = false; onSnooze() },
-                modifier = Modifier.testTag("taskMenuSnooze:${task.name}"),
-            )
-            DropdownMenuItem(
-                text = { Text("Mark done at…") },
-                onClick = { menuExpanded = false; onMarkDoneAt() },
-                modifier = Modifier.testTag("taskMenuMarkDoneAt:${task.name}"),
-            )
-            DropdownMenuItem(
-                text = { Text("Mark done with notes…") },
-                onClick = { menuExpanded = false; onCompleteWithNotes() },
-                modifier = Modifier.testTag("taskMenuCompleteWithNotes:${task.name}"),
-            )
-            DropdownMenuItem(
-                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                onClick = { menuExpanded = false; onDelete() },
-                modifier = Modifier.testTag("taskMenuDelete:${task.name}"),
-            )
         }
     }
 }
@@ -1503,25 +1425,99 @@ private fun AddAreaDialog(
     )
 }
 
+/** Unified swipe-right modal: pick when, who, and per-completion notes. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CompleteWithNotesDialog(
+private fun CompleteTaskDialog(
     task: Task,
+    members: List<Member>,
+    currentUserId: String?,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (at: Long?, notes: String, completedBy: String?) -> Unit,
 ) {
+    val now = remember { System.currentTimeMillis() }
+    val dayMs = 86_400_000L
+    val createdDay = (task.createdAt / dayMs) * dayMs
+    val todayDay = (now / dayMs) * dayMs
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = todayDay,
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                utcTimeMillis in createdDay..todayDay
+        },
+    )
+    var showDatePicker by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
+    val initialMember = currentUserId?.let { id -> members.firstOrNull { it.id == id } }
+        ?: members.firstOrNull()
+    var selectedMember by remember { mutableStateOf<Member?>(initialMember) }
+    var assigneeExpanded by remember { mutableStateOf(false) }
+
+    val selectedDay = datePickerState.selectedDateMillis ?: todayDay
+    val isToday = selectedDay == todayDay
+    val dateLabel = remember(selectedDay) {
+        java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(selectedDay))
+    }
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        ) { DatePicker(state = datePickerState) }
+    }
+
     AlertDialog(
-        modifier = Modifier.testTag("completeWithNotesDialog:${task.name}"),
+        modifier = Modifier.testTag("completeTaskDialog:${task.name}"),
         onDismissRequest = onDismiss,
-        title = { Text("Mark done with notes") },
+        title = { Text("Mark \"${task.name}\" done") },
         text = {
-            Column {
-                Text("Notes for this completion of \"${task.name}\":")
-                Spacer(Modifier.height(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Done on", style = MaterialTheme.typography.labelMedium)
+                Button(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("completeDateField"),
+                ) { Text(dateLabel) }
+                if (members.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = assigneeExpanded,
+                        onExpandedChange = { assigneeExpanded = it },
+                        modifier = Modifier.testTag("completedByPicker"),
+                    ) {
+                        OutlinedTextField(
+                            value = selectedMember?.displayName ?: "Unassigned",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Completed by") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(assigneeExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = assigneeExpanded,
+                            onDismissRequest = { assigneeExpanded = false },
+                        ) {
+                            members.forEach { member ->
+                                DropdownMenuItem(
+                                    text = { Text(member.displayName) },
+                                    onClick = { selectedMember = member; assigneeExpanded = false },
+                                    modifier = Modifier.testTag("completedByOption:${member.displayName}"),
+                                )
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     notes,
                     { notes = it },
-                    placeholder = { Text("e.g. milk, eggs, bread — got everything except cilantro") },
+                    label = { Text("Notes for this completion (optional)") },
+                    placeholder = { Text("e.g. used paper towels, ran out of cleaner") },
                     modifier = Modifier.fillMaxWidth().testTag("completionNotesField"),
                     minLines = 3,
                 )
@@ -1529,44 +1525,118 @@ private fun CompleteWithNotesDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = notes.isNotBlank(),
-                modifier = Modifier.testTag("completeWithNotesConfirm"),
-                onClick = { onConfirm(notes.trim()) },
-            ) { Text("Mark done") }
+                modifier = Modifier.testTag("completeTaskConfirm"),
+                onClick = {
+                    // Pass `at` only when not today; otherwise let the server stamp `now`
+                    // so we don't accidentally send a past timestamp for "today".
+                    val at = if (isToday) null else selectedDay
+                    onConfirm(at, notes.trim(), selectedMember?.id)
+                },
+            ) { Text("Complete") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
+/** Unified swipe-left modal: snooze for an arbitrary duration, or hard-delete. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RetroactiveDoneDialog(
+private fun SnoozeOrDeleteDialog(
     task: Task,
     onDismiss: () -> Unit,
-    onConfirm: (Long) -> Unit,
+    onSnooze: (until: Long) -> Unit,
+    onDelete: () -> Unit,
 ) {
-    val now = System.currentTimeMillis()
-    val createdAt = task.createdAt
-    val pickerState = rememberDatePickerState(
-        initialSelectedDateMillis = now,
-        selectableDates = object : SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                utcTimeMillis in createdAt..now
-        },
-    )
-    DatePickerDialog(
-        modifier = Modifier.testTag("retroactiveDialog:${task.name}"),
+    var amount by remember { mutableStateOf("1") }
+    var unit by remember { mutableStateOf(SnoozeUnit.DAYS) }
+    var unitExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        modifier = Modifier.testTag("snoozeOrDeleteDialog:${task.name}"),
         onDismissRequest = onDismiss,
+        title = { Text("\"${task.name}\"") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Snooze for")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { v -> amount = v.filter { it.isDigit() }.take(4) },
+                        label = { Text("N") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("snoozeAmountField"),
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = unitExpanded,
+                        onExpandedChange = { unitExpanded = it },
+                        modifier = Modifier.weight(2f),
+                    ) {
+                        OutlinedTextField(
+                            value = unit.label,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Unit") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(unitExpanded) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth()
+                                .testTag("snoozeUnitField"),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = unitExpanded,
+                            onDismissRequest = { unitExpanded = false },
+                        ) {
+                            SnoozeUnit.entries.forEach { u ->
+                                DropdownMenuItem(
+                                    text = { Text(u.label) },
+                                    onClick = { unit = u; unitExpanded = false },
+                                    modifier = Modifier.testTag("snoozeUnitOption:${u.name}"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
         confirmButton = {
             TextButton(
-                modifier = Modifier.testTag("retroactiveConfirm"),
-                onClick = { pickerState.selectedDateMillis?.let(onConfirm) },
-            ) { Text("Mark done") }
+                enabled = (amount.toIntOrNull() ?: 0) > 0,
+                modifier = Modifier.testTag("snoozeConfirm"),
+                onClick = {
+                    val n = amount.toIntOrNull() ?: 1
+                    val cal = java.util.Calendar.getInstance()
+                    when (unit) {
+                        SnoozeUnit.DAYS -> cal.add(java.util.Calendar.DAY_OF_MONTH, n)
+                        SnoozeUnit.WEEKS -> cal.add(java.util.Calendar.WEEK_OF_YEAR, n)
+                        SnoozeUnit.MONTHS -> cal.add(java.util.Calendar.MONTH, n)
+                        SnoozeUnit.YEARS -> cal.add(java.util.Calendar.YEAR, n)
+                    }
+                    onSnooze(cal.timeInMillis)
+                },
+            ) { Text("Snooze") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    ) {
-        DatePicker(state = pickerState)
-    }
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.testTag("deleteTaskConfirm"),
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    )
+}
+
+private enum class SnoozeUnit(val label: String) {
+    DAYS("Days"),
+    WEEKS("Weeks"),
+    MONTHS("Months"),
+    YEARS("Years"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

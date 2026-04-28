@@ -11,6 +11,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.ActivityEntry
 import com.chore.tracker.data.FakeApi
@@ -88,7 +90,7 @@ class HomeScreenTest {
         }
     }
 
-    @Test fun `golden path add area add task complete task`() {
+    @Test fun `golden path add area then add task in it`() {
         val fake = FakeApi()
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
@@ -115,13 +117,26 @@ class HomeScreenTest {
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("taskRow:Scrub tub").fetchSemanticsNodes().isNotEmpty()
         }
-
-        // Complete it
-        compose.onNodeWithTag("completeButton:Scrub tub").performClick()
-        compose.waitUntil(2_000) { fake.completed.isNotEmpty() }
-        assertThat(fake.completed).hasSize(1)
         assertThat(fake.createdAreas.map { it.name }).containsExactly("Bathroom")
         assertThat(fake.createdTasks.map { it.name }).containsExactly("Scrub tub")
+    }
+
+    @Test fun `tapping a task row opens the edit dialog`() {
+        val fake = FakeApi().apply {
+            areas.add(Area("a1", "Kitchen", null, 0, 0))
+            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
+        }
+        val repo = newRepo(fake)
+        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
+
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").performClick()
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("editTaskDialog").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("editTaskDialog").assertIsDisplayed()
     }
 
     @Test fun `tapping invite shows the code returned by the api`() {
@@ -135,47 +150,6 @@ class HomeScreenTest {
         }
         compose.onNodeWithTag("inviteCodeText").assertIsDisplayed()
         compose.onNodeWithText("JOIN-ABCDEF").assertIsDisplayed()
-    }
-
-    @Test fun `completing a task surfaces the undo snackbar`() {
-        val fake = FakeApi().apply {
-            areas.add(Area("a1", "Kitchen", null, 0, 0))
-            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
-        }
-        val repo = newRepo(fake)
-        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("completeButton:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("completeButton:Mop floor").performClick()
-
-        compose.waitUntil(2_000) { fake.completed.isNotEmpty() }
-        compose.waitUntil(3_000) {
-            compose.onAllNodesWithText("Marked done").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("Marked done").assertIsDisplayed()
-        compose.onNodeWithText("Undo").assertIsDisplayed()
-    }
-
-    @Test fun `tapping undo on the snackbar calls the undo api`() {
-        val fake = FakeApi().apply {
-            areas.add(Area("a1", "Kitchen", null, 0, 0))
-            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
-        }
-        val repo = newRepo(fake)
-        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("completeButton:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("completeButton:Mop floor").performClick()
-        compose.waitUntil(3_000) {
-            compose.onAllNodesWithText("Undo").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("Undo").performClick()
-        compose.waitUntil(2_000) { fake.undone.isNotEmpty() }
-        assertThat(fake.undone).containsExactly("t1")
     }
 
     @Test fun `tapping the settings icon invokes the open-settings callback`() {
@@ -240,7 +214,7 @@ class HomeScreenTest {
         compose.onNodeWithTag("workloadName:Bob").assertIsDisplayed()
     }
 
-    @Test fun `long press task row shows context menu with edit and delete`() {
+    @Test fun `swipe left on task opens snooze or delete dialog`() {
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
             tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
@@ -251,15 +225,15 @@ class HomeScreenTest {
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskMenu:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { swipeLeft() }
+        compose.waitUntil(3_000) {
+            compose.onAllNodesWithTag("snoozeOrDeleteDialog:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("taskMenuEdit:Mop floor").assertIsDisplayed()
-        compose.onNodeWithTag("taskMenuDelete:Mop floor").assertIsDisplayed()
+        compose.onNodeWithTag("snoozeAmountField").assertIsDisplayed()
+        compose.onNodeWithTag("deleteTaskConfirm").assertIsDisplayed()
     }
 
-    @Test fun `long press task and tap delete shows confirmation dialog`() {
+    @Test fun `swipe right on task opens complete dialog`() {
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
             tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
@@ -270,17 +244,13 @@ class HomeScreenTest {
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskMenuDelete:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { swipeRight() }
+        compose.waitUntil(3_000) {
+            compose.onAllNodesWithTag("completeTaskDialog:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("taskMenuDelete:Mop floor").performClick()
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("deleteTaskDialog:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("deleteTaskConfirm").performClick()
-        compose.waitUntil(2_000) { fake.tasks.isEmpty() }
-        assertThat(fake.tasks).isEmpty()
+        compose.onNodeWithTag("completeTaskConfirm").performClick()
+        compose.waitUntil(2_000) { fake.completed.isNotEmpty() }
+        assertThat(fake.completed).hasSize(1)
     }
 
     @Test fun `long press area header shows context menu with rename and delete`() {
@@ -357,56 +327,6 @@ class HomeScreenTest {
         compose.onNodeWithTag("resumeButton").performClick()
         compose.waitUntil(2_000) { fake.pausedUntil == null }
         assertThat(fake.pausedUntil).isNull()
-    }
-
-    @Test fun `long press task shows snooze and mark done at options`() {
-        val fake = FakeApi().apply {
-            areas.add(Area("a1", "Kitchen", null, 0, 0))
-            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
-        }
-        val repo = newRepo(fake)
-        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskMenuSnooze:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("taskMenuSnooze:Mop floor").assertIsDisplayed()
-        compose.onNodeWithTag("taskMenuMarkDoneAt:Mop floor").assertIsDisplayed()
-    }
-
-    @Test fun `snooze 3 days calls fake api with correct future timestamp`() {
-        val fake = FakeApi().apply {
-            areas.add(Area("a1", "Kitchen", null, 0, 0))
-            tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
-        }
-        val repo = newRepo(fake)
-        compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("taskRow:Mop floor").performTouchInput { longClick() }
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("taskMenuSnooze:Mop floor").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("taskMenuSnooze:Mop floor").performClick()
-        compose.waitUntil(2_000) {
-            compose.onAllNodesWithTag("snoozeOption:3").fetchSemanticsNodes().isNotEmpty()
-        }
-        val before = System.currentTimeMillis()
-        compose.onNodeWithTag("snoozeOption:3").performClick()
-        compose.waitUntil(2_000) { fake.snoozed.isNotEmpty() }
-        assertThat(fake.snoozed).hasSize(1)
-        val (taskId, until) = fake.snoozed.first()
-        assertThat(taskId).isEqualTo("t1")
-        // Snooze should be ~3 days from now (with a generous fudge factor)
-        val expected = before + 3 * 86_400_000L
-        assertThat(until).isAtLeast(expected - 5_000)
-        assertThat(until).isAtMost(expected + 5_000)
     }
 
     @Test fun `dirtiness uses server-computed dueness when present`() {

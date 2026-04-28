@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -43,7 +44,12 @@ import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(session: Session, onBack: () -> Unit, repo: Repo? = null) {
+fun SettingsScreen(
+    session: Session,
+    onBack: () -> Unit,
+    repo: Repo? = null,
+    onSignOut: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val current by session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
 
@@ -95,6 +101,25 @@ fun SettingsScreen(session: Session, onBack: () -> Unit, repo: Repo? = null) {
                 Spacer(Modifier.height(16.dp))
                 DebugSection(session = session, repo = repo)
             }
+
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        repo?.logout() ?: session.setToken(null)
+                        onSignOut()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("signOutButton"),
+            ) { Text("Sign out") }
         }
     }
 }

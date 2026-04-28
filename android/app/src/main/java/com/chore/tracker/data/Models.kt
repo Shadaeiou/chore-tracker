@@ -131,7 +131,11 @@ data class CopyAreaRequest(val name: String)
 data class SnoozeRequest(val until: Long)
 
 @Serializable
-data class CompleteRequest(val at: Long? = null, val notes: String? = null)
+data class CompleteRequest(
+    val at: Long? = null,
+    val notes: String? = null,
+    val completedBy: String? = null,
+)
 
 @Serializable
 data class Member(val id: String, val displayName: String, val email: String)

@@ -20,9 +20,21 @@ data class HouseholdState(
     val activity: List<ActivityEntry> = emptyList(),
     val workload: List<WorkloadEntry> = emptyList(),
     val pausedUntil: Long? = null,
+    val currentUserId: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
+
+/** Pull `sub` (user id) out of a JWT payload without verifying the signature. */
+internal fun jwtSub(token: String?): String? {
+    if (token.isNullOrBlank()) return null
+    val parts = token.split(".")
+    if (parts.size < 2) return null
+    return try {
+        val payload = String(java.util.Base64.getUrlDecoder().decode(parts[1]))
+        Regex("\"sub\"\\s*:\\s*\"([^\"]+)\"").find(payload)?.groupValues?.get(1)
+    } catch (_: Throwable) { null }
+}
 
 class Repo(
     val session: Session,
@@ -92,6 +104,7 @@ class Repo(
                 activity = activity,
                 workload = workload,
                 pausedUntil = household.household.pausedUntil,
+                currentUserId = jwtSub(session.token()),
                 isLoading = false,
                 error = null,
             )
