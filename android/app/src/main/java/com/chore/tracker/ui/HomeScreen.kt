@@ -159,7 +159,84 @@ fun HomeScreen(
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
+    // IDs the user just "deleted" but whose API call is still pending while
+    // the undo snackbar is up. Filtered out of the visible task/area lists so
+    // the row disappears immediately, but the actual DELETE only fires once
+    // the snackbar dismisses without the Undo action being tapped.
+    var pendingDeletedTaskIds by remember { mutableStateOf(setOf<String>()) }
+    var pendingDeletedAreaIds by remember { mutableStateOf(setOf<String>()) }
+    val deferDeleteTasks: (List<Task>) -> Unit = { tasksToDelete ->
+        if (tasksToDelete.isNotEmpty()) {
+            val ids = tasksToDelete.map { it.id }
+            pendingDeletedTaskIds = pendingDeletedTaskIds + ids
+            scope.launch {
+                val message = if (tasksToDelete.size == 1) "Deleted \"${tasksToDelete[0].name}\""
+                else "Deleted ${tasksToDelete.size} tasks"
+                val result = snackbarHost.showSnackbar(
+                    message = message,
+                    actionLabel = "Undo",
+                    duration = androidx.compose.material3.SnackbarDuration.Long,
+                    withDismissAction = true,
+                )
+                if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                    pendingDeletedTaskIds = pendingDeletedTaskIds - ids.toSet()
+                } else {
+                    var failures = 0
+                    ids.forEach { id ->
+                        runCatching { repo.api.deleteTask(id) }.onFailure { failures++ }
+                    }
+                    pendingDeletedTaskIds = pendingDeletedTaskIds - ids.toSet()
+                    repo.refresh()
+                    if (failures > 0) {
+                        snackbarHost.showSnackbar("$failures of ${ids.size} deletes failed")
+                    }
+                }
+            }
+        }
+    }
+    val deferDeleteAreas: (List<Area>) -> Unit = { areasToDelete ->
+        if (areasToDelete.isNotEmpty()) {
+            val ids = areasToDelete.map { it.id }
+            pendingDeletedAreaIds = pendingDeletedAreaIds + ids
+            scope.launch {
+                val message = if (areasToDelete.size == 1) "Deleted \"${areasToDelete[0].name}\""
+                else "Deleted ${areasToDelete.size} areas"
+                val result = snackbarHost.showSnackbar(
+                    message = message,
+                    actionLabel = "Undo",
+                    duration = androidx.compose.material3.SnackbarDuration.Long,
+                    withDismissAction = true,
+                )
+                if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                    pendingDeletedAreaIds = pendingDeletedAreaIds - ids.toSet()
+                } else {
+                    var failures = 0
+                    ids.forEach { id ->
+                        runCatching { repo.api.deleteArea(id) }.onFailure { failures++ }
+                    }
+                    pendingDeletedAreaIds = pendingDeletedAreaIds - ids.toSet()
+                    repo.refresh()
+                    if (failures > 0) {
+                        snackbarHost.showSnackbar("$failures of ${ids.size} deletes failed")
+                    }
+                }
+            }
+        }
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
+    // Apply pending-delete filtering once. Anything mid-undo is hidden from
+    // the UI but not yet removed on the server.
+    val visibleAreas = remember(state.areas, pendingDeletedAreaIds) {
+        state.areas.filter { it.id !in pendingDeletedAreaIds }
+    }
+    val visibleTasks = remember(state.tasks, pendingDeletedTaskIds, pendingDeletedAreaIds) {
+        state.tasks.filter {
+            it.id !in pendingDeletedTaskIds && it.areaId !in pendingDeletedAreaIds
+        }
+    }
+    val visibleState = remember(state, visibleAreas, visibleTasks) {
+        state.copy(areas = visibleAreas, tasks = visibleTasks)
+    }
     val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
     val autoUpdate by repo.session.autoUpdateFlow.collectAsState(initial = false)
     val collapsedAreaIds by repo.session.collapsedAreaIdsFlow.collectAsState(initial = emptySet())
@@ -264,7 +341,7 @@ fun HomeScreen(
                             }
                         } else {
                             TodayList(
-                                state = state,
+                                state = visibleState,
                                 indicators = statusIndicators,
                                 onSwipeRight = { notesCompletionTask = it },
                                 onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
@@ -322,36 +399,24 @@ fun HomeScreen(
                                 selectedAreaIds = emptySet()
                             },
                             onConfirmDeleteSelected = {
-                                val toDelete = selectedAreaIds
+                                val toDelete = state.areas.filter { it.id in selectedAreaIds }
                                 selectAreasMode = false
                                 selectedAreaIds = emptySet()
-                                scope.launch {
-                                    var failures = 0
-                                    toDelete.forEach { id ->
-                                        runCatching { repo.api.deleteArea(id) }
-                                            .onFailure { failures++ }
-                                    }
-                                    repo.refresh()
-                                    if (failures == 0) {
-                                        snackbarHost.showSnackbar("Deleted ${toDelete.size} area${if (toDelete.size == 1) "" else "s"}")
-                                    } else {
-                                        snackbarHost.showSnackbar("$failures of ${toDelete.size} deletes failed")
-                                    }
-                                }
+                                deferDeleteAreas(toDelete)
                             },
                             onCancelSelection = {
                                 selectAreasMode = false
                                 selectedAreaIds = emptySet()
                             },
                         )
-                        if (state.areas.isEmpty()) {
+                        if (visibleAreas.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Tap + to add your first area")
                             }
                         } else if (selectAreasMode) {
                             ReorderableAreaList(
-                                areas = state.areas,
-                                taskCount = { area -> state.tasks.count { it.areaId == area.id } },
+                                areas = visibleAreas,
+                                taskCount = { area -> visibleTasks.count { it.areaId == area.id } },
                                 selected = selectedAreaIds,
                                 onToggle = { id ->
                                     selectedAreaIds = if (id in selectedAreaIds) selectedAreaIds - id
@@ -399,8 +464,8 @@ fun HomeScreen(
                             // Filter areas + tasks based on search
                             val rawQuery = householdSearchQuery
                             val hasQuery = rawQuery.trim().isNotEmpty()
-                            val filteredAreas = if (!hasQuery) state.areas else state.areas.filter { area ->
-                                val areaTaskList = state.tasks.filter { it.areaId == area.id }
+                            val filteredAreas = if (!hasQuery) visibleAreas else visibleAreas.filter { area ->
+                                val areaTaskList = visibleTasks.filter { it.areaId == area.id }
                                 if (areaTaskList.isEmpty()) {
                                     areaNameMatchesAllTokens(area, rawQuery)
                                 } else {
@@ -414,8 +479,8 @@ fun HomeScreen(
                             } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
                                 items(filteredAreas, key = { it.id }) { area ->
-                                    val areaTasks = if (!hasQuery) state.tasks.filter { it.areaId == area.id }
-                                    else state.tasks.filter {
+                                    val areaTasks = if (!hasQuery) visibleTasks.filter { it.areaId == area.id }
+                                    else visibleTasks.filter {
                                         it.areaId == area.id && taskMatchesHouseholdSearch(it, area, rawQuery)
                                     }
                                     AreaCard(
@@ -436,19 +501,8 @@ fun HomeScreen(
                                         onDeleteArea = { deletingArea = area },
                                         onEditTask = { task -> editingTask = task },
                                         onMassDeleteTasks = { taskIds ->
-                                            scope.launch {
-                                                var failures = 0
-                                                taskIds.forEach { id ->
-                                                    runCatching { repo.api.deleteTask(id) }
-                                                        .onFailure { failures++ }
-                                                }
-                                                repo.refresh()
-                                                if (failures == 0) {
-                                                    snackbarHost.showSnackbar("Deleted ${taskIds.size} task${if (taskIds.size == 1) "" else "s"}")
-                                                } else {
-                                                    snackbarHost.showSnackbar("$failures of ${taskIds.size} deletes failed")
-                                                }
-                                            }
+                                            val toDelete = state.tasks.filter { it.id in taskIds }
+                                            deferDeleteTasks(toDelete)
                                         },
                                         onSwipeRightTask = { task -> notesCompletionTask = task },
                                         onSwipeLeftTask = { task -> snoozingTask = SnoozeAction(task, allowDelete = true) },
@@ -605,17 +659,13 @@ fun HomeScreen(
             modifier = Modifier.testTag("deleteAreaDialog:${area.name}"),
             onDismissRequest = { deletingArea = null },
             title = { Text("Delete ${area.name}?") },
-            text = { Text("This will also delete all tasks in this area. This cannot be undone.") },
+            text = { Text("This will also delete all tasks in this area. You can undo for 10 seconds.") },
             confirmButton = {
                 TextButton(
                     modifier = Modifier.testTag("deleteAreaConfirm"),
                     onClick = {
                         deletingArea = null
-                        scope.launch {
-                            runCatching { repo.api.deleteArea(area.id) }
-                                .onSuccess { repo.refresh() }
-                                .onFailure { snackbarHost.showSnackbar("Failed to delete area: ${it.message}") }
-                        }
+                        deferDeleteAreas(listOf(area))
                     },
                 ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
@@ -711,11 +761,7 @@ fun HomeScreen(
             onDelete = if (allowDelete) {
                 {
                     snoozingTask = null
-                    scope.launch {
-                        runCatching { repo.api.deleteTask(task.id) }
-                            .onSuccess { repo.refresh() }
-                            .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
-                    }
+                    deferDeleteTasks(listOf(task))
                 }
             } else null,
         )
