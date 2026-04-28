@@ -24,6 +24,25 @@ class FakeApi : ChoreApi {
 
     override suspend fun register(req: RegisterRequest): AuthResponse { maybeThrow(); return nextAuth }
     override suspend fun login(req: LoginRequest): AuthResponse { maybeThrow(); return nextAuth }
+    var meProfile: UserProfile = UserProfile(
+        id = "user-1", email = "tester@example.com", displayName = "Tester",
+        avatar = null, avatarVersion = 0,
+    )
+    override suspend fun me(): UserProfile { maybeThrow(); return meProfile }
+    override suspend fun patchMe(req: PatchProfileRequest): UserProfile {
+        maybeThrow()
+        meProfile = meProfile.copy(
+            displayName = req.displayName ?: meProfile.displayName,
+            avatar = if (req.avatar !== null) req.avatar else meProfile.avatar,
+            avatarVersion = if (req.avatar !== null) meProfile.avatarVersion + 1 else meProfile.avatarVersion,
+        )
+        return meProfile
+    }
+    val avatarsByUser = mutableMapOf<String, UserAvatarResponse>()
+    override suspend fun userAvatar(id: String): UserAvatarResponse {
+        maybeThrow()
+        return avatarsByUser[id] ?: UserAvatarResponse(avatar = null, avatarVersion = 0)
+    }
     var pausedUntil: Long? = null
     override suspend fun household(): HouseholdResponse {
         maybeThrow()

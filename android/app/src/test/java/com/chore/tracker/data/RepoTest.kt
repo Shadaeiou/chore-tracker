@@ -60,7 +60,7 @@ class RepoTest {
     @Test fun `refresh populates members, activity, and workload`() = runTest {
         val fake = FakeApi().apply {
             members.add(Member("u1", "Alice", "alice@example.com"))
-            activityFeed.add(ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", 0L))
+            activityFeed.add(ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", doneAt = 0L))
             workloadData.add(WorkloadEntry("u1", "Alice", 3))
         }
         val repo = newRepo(this, fake)

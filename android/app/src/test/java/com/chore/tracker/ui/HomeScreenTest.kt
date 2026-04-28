@@ -186,7 +186,7 @@ class HomeScreenTest {
     @Test fun `tapping activity tab shows activity screen`() {
         val fake = FakeApi().apply {
             activityFeed.add(
-                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", System.currentTimeMillis()),
+                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", doneAt = System.currentTimeMillis()),
             )
         }
         val repo = newRepo(fake)
@@ -206,7 +206,7 @@ class HomeScreenTest {
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
             activityFeed.add(
-                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", System.currentTimeMillis()),
+                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", doneAt = System.currentTimeMillis()),
             )
             workloadData.add(WorkloadEntry("u1", "Alice", 5))
             workloadData.add(WorkloadEntry("u2", "Bob", 2))
