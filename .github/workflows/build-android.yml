@@ -38,14 +38,27 @@ jobs:
           if [ -z "$URL" ]; then URL="https://chore-tracker-api.example.workers.dev/"; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Build debug APK
+      - name: Decode signing keystore
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "::error::KEYSTORE_BASE64 secret is not set — cannot produce a signed release APK."
+            exit 1
+          fi
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Build release APK
         working-directory: android
-        run: gradle :app:assembleDebug -PapiBaseUrl=${{ steps.api.outputs.url }}
+        run: gradle :app:assembleRelease -PapiBaseUrl=${{ steps.api.outputs.url }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: chore-tracker-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: chore-tracker-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
 
       # Compute the same versionCode the Gradle build derives so the in-app
       # updater can compare against the release tag.
@@ -60,18 +73,15 @@ jobs:
 
       # On push-to-main: auto-publish a Release tagged v<name>+<code>. The
       # in-app updater hits /releases/latest, parses the tag, and installs.
-      # NOTE: signing is currently the random debug keystore that GitHub
-      # Actions generates per-runner, which means installs from this stream
-      # will fail with "signature mismatch" until we plumb a stable keystore
-      # through GH secrets. The bootstrap is in place; signing is the next
-      # piece.
+      # APKs are signed with the keystore decoded above so installs from this
+      # stream chain correctly.
       - name: Publish auto-release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.name }} (build ${{ steps.ver.outputs.code }})
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: android/app/build/outputs/apk/release/app-release.apk
           prerelease: true
           body: |
             Automated build from commit ${{ github.sha }}.
@@ -82,4 +92,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: android/app/build/outputs/apk/release/app-release.apk

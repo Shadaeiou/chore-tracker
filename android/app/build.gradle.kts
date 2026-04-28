@@ -42,6 +42,22 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
+    // Release signing is configured from environment variables that CI sets
+    // after decoding the base64 keystore stored in GitHub secrets. Local
+    // `assembleRelease` without the env vars falls back to debug signing
+    // (see buildTypes.release below).
+    signingConfigs {
+        create("release") {
+            val storePath = System.getenv("RELEASE_KEYSTORE_PATH")
+            if (storePath != null && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -49,6 +65,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.findByName("release")
+                ?.takeIf { it.storeFile != null }
+                ?: signingConfigs.getByName("debug")
         }
     }
 
