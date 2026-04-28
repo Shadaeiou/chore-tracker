@@ -178,7 +178,7 @@ fun HomeScreen(
         snackbarHost = { SnackbarHost(snackbarHost, modifier = Modifier.testTag("snackbarHost")) },
         topBar = {
             TopAppBar(
-                title = { Text("Chores") },
+                title = { Text("Dobby") },
                 actions = {
                     IconButton(
                         modifier = Modifier.testTag("settingsButton"),

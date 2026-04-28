@@ -3,21 +3,24 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Same sock as ic_sock but ever-so-slightly inset for the adaptive
-         icon's safe zone. -->
+    <!-- Adaptive icons clip to the inner ~66dp circle (33dp radius from
+         center 54,54). Keep the sock entirely within roughly (38,32) to
+         (76,76) so the circular launcher mask doesn't crop the cuff or
+         toe. The standalone in-app `ic_sock` keeps the original larger
+         layout because it's not subject to the launcher mask. -->
     <path
         android:fillColor="#FAFAFA"
-        android:pathData="M32,22 H66 V56 H84 V84 H32 Z"/>
+        android:pathData="M40,34 H64 V58 H76 V76 H40 Z"/>
     <path
         android:fillColor="#D32F2F"
-        android:pathData="M32,22 H66 V30 H32 Z"/>
+        android:pathData="M40,34 H64 V40 H40 Z"/>
     <path
         android:fillColor="#FBC02D"
-        android:pathData="M32,34 H66 V40 H32 Z"/>
+        android:pathData="M40,42 H64 V47 H40 Z"/>
     <path
         android:fillColor="#388E3C"
-        android:pathData="M32,44 H66 V50 H32 Z"/>
+        android:pathData="M40,49 H64 V54 H40 Z"/>
     <path
         android:fillColor="#90CAF9"
-        android:pathData="M76,68 H84 V84 H76 Z"/>
+        android:pathData="M70,66 H76 V76 H70 Z"/>
 </vector>
