@@ -28,12 +28,13 @@ appId: com.chore.tracker
 - takeScreenshot: phase3_02_after_permission
 
 # Add area + task and complete it (verifies backend still works with FCM wired in).
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addAreaFab" }
 - tapOn: { id: "textDialogField" }
 - inputText: "Kitchen"
 - tapOn: { id: "textDialogConfirm" }
 - assertVisible: "Kitchen"
-- tapOn: { id: "tab:areas" }
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addTaskButton:Kitchen" }
 - tapOn: { id: "taskNameField" }
 - inputText: "Wipe counter"

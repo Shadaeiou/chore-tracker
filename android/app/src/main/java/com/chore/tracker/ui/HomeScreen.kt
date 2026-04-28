@@ -121,6 +121,8 @@ fun HomeScreen(
     var copyingArea by remember { mutableStateOf<Area?>(null) }
     var renamingHousehold by remember { mutableStateOf(false) }
     var libraryForArea by remember { mutableStateOf<Area?>(null) }
+    var selectAreasMode by remember { mutableStateOf(false) }
+    var selectedAreaIds by remember { mutableStateOf(setOf<String>()) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var snoozingTask by remember { mutableStateOf<Task?>(null) }
@@ -210,8 +212,8 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            // FAB available on Plan and Areas tabs (not Activity).
-            if (selectedTab != 2) {
+            // FAB only on the Household tab — Today is for triage, Activity is read-only.
+            if (selectedTab == 1) {
                 FloatingActionButton(
                     modifier = Modifier.testTag("addAreaFab"),
                     onClick = { showAddArea = true },
@@ -305,34 +307,39 @@ fun HomeScreen(
                 ) {
                     Column(Modifier.fillMaxSize()) {
                         TabHeader(state, repo, scope, snackbarHost)
-                        // Household header: name + rename
-                        state.household?.let { hh ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                    .testTag("householdHeader"),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        hh.name,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        modifier = Modifier.testTag("householdName"),
-                                    )
-                                    val memberWord = if (state.members.size == 1) "member" else "members"
-                                    Text(
-                                        "${state.members.size} $memberWord",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                        HouseholdHeader(
+                            household = state.household,
+                            memberCount = state.members.size,
+                            selectAreasMode = selectAreasMode,
+                            selectedCount = selectedAreaIds.size,
+                            onLongPressRename = { renamingHousehold = true },
+                            onLongPressSelectAreas = {
+                                selectAreasMode = true
+                                selectedAreaIds = emptySet()
+                            },
+                            onConfirmDeleteSelected = {
+                                val toDelete = selectedAreaIds
+                                selectAreasMode = false
+                                selectedAreaIds = emptySet()
+                                scope.launch {
+                                    var failures = 0
+                                    toDelete.forEach { id ->
+                                        runCatching { repo.api.deleteArea(id) }
+                                            .onFailure { failures++ }
+                                    }
+                                    repo.refresh()
+                                    if (failures == 0) {
+                                        snackbarHost.showSnackbar("Deleted ${toDelete.size} area${if (toDelete.size == 1) "" else "s"}")
+                                    } else {
+                                        snackbarHost.showSnackbar("$failures of ${toDelete.size} deletes failed")
+                                    }
                                 }
-                                TextButton(
-                                    modifier = Modifier.testTag("renameHouseholdButton"),
-                                    onClick = { renamingHousehold = true },
-                                ) { Text("Rename") }
-                            }
-                        }
+                            },
+                            onCancelSelection = {
+                                selectAreasMode = false
+                                selectedAreaIds = emptySet()
+                            },
+                        )
                         if (state.areas.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Tap + to add your first area")
@@ -340,6 +347,20 @@ fun HomeScreen(
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
                                 items(state.areas, key = { it.id }) { area ->
+                                    if (selectAreasMode) {
+                                        SelectableAreaCard(
+                                            area = area,
+                                            taskCount = state.tasks.count { it.areaId == area.id },
+                                            checked = area.id in selectedAreaIds,
+                                            onToggle = {
+                                                selectedAreaIds = if (area.id in selectedAreaIds)
+                                                    selectedAreaIds - area.id
+                                                else selectedAreaIds + area.id
+                                            },
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        return@items
+                                    }
                                     AreaCard(
                                         area = area,
                                         tasks = state.tasks.filter { it.areaId == area.id },
@@ -438,10 +459,18 @@ fun HomeScreen(
             onConfirm = { templateIds ->
                 libraryForArea = null
                 scope.launch {
+                    val now = System.currentTimeMillis()
                     var failures = 0
                     templateIds.forEach { tmplId ->
                         runCatching {
-                            repo.api.createTask(CreateTaskRequest(areaId = area.id, templateId = tmplId))
+                            repo.api.createTask(
+                                CreateTaskRequest(
+                                    areaId = area.id,
+                                    templateId = tmplId,
+                                    // Start green so a fresh batch isn't a wall of red.
+                                    lastDoneAt = now,
+                                ),
+                            )
                         }.onFailure { failures++ }
                     }
                     repo.refresh()
@@ -541,6 +570,10 @@ fun HomeScreen(
                                 assignedTo = assignedTo,
                                 autoRotate = autoRotate,
                                 effortPoints = effortPoints,
+                                // Start the indicator green: treat the task as just done.
+                                // Avoids the bad UX where every newly added task immediately
+                                // shows as overdue.
+                                lastDoneAt = System.currentTimeMillis(),
                             ),
                         )
                     }
@@ -724,6 +757,130 @@ private fun InviteCodeDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+/** Household tab header — long-press for actions, switches to a selection bar
+ *  when select-areas mode is on. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HouseholdHeader(
+    household: com.chore.tracker.data.Household?,
+    memberCount: Int,
+    selectAreasMode: Boolean,
+    selectedCount: Int,
+    onLongPressRename: () -> Unit,
+    onLongPressSelectAreas: () -> Unit,
+    onConfirmDeleteSelected: () -> Unit,
+    onCancelSelection: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    if (selectAreasMode) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag("areaSelectionBar"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "$selectedCount selected",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            TextButton(
+                enabled = selectedCount > 0,
+                modifier = Modifier.testTag("massDeleteAreasButton"),
+                onClick = onConfirmDeleteSelected,
+            ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onCancelSelection) { Text("Cancel") }
+        }
+        return
+    }
+
+    if (household == null) return
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { menuExpanded = true },
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("householdHeader"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    household.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.testTag("householdName"),
+                )
+                val memberWord = if (memberCount == 1) "member" else "members"
+                Text(
+                    "$memberCount $memberWord · long-press for actions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            modifier = Modifier.testTag("householdMenu"),
+        ) {
+            DropdownMenuItem(
+                text = { Text("Rename household") },
+                onClick = { menuExpanded = false; onLongPressRename() },
+                modifier = Modifier.testTag("householdMenuRename"),
+            )
+            DropdownMenuItem(
+                text = { Text("Select areas…") },
+                onClick = { menuExpanded = false; onLongPressSelectAreas() },
+                modifier = Modifier.testTag("householdMenuSelectAreas"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectableAreaCard(
+    area: Area,
+    taskCount: Int,
+    checked: Boolean,
+    onToggle: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("selectableAreaCard:${area.name}"),
+        colors = CardDefaults.cardColors(
+            containerColor = if (checked) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.Checkbox(
+                checked = checked,
+                onCheckedChange = { onToggle() },
+                modifier = Modifier.testTag("selectableAreaCheckbox:${area.name}"),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(area.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (taskCount == 1) "1 task" else "$taskCount tasks",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** Shared header for Plan and Areas tabs: error message + vacation banner. */

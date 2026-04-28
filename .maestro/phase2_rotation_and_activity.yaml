@@ -22,6 +22,7 @@ appId: com.chore.tracker
 - takeScreenshot: phase2_01_signed_in_tabs_visible
 
 # Add area
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addAreaFab" }
 - tapOn: { id: "textDialogField" }
 - inputText: "Kitchen"
@@ -30,7 +31,7 @@ appId: com.chore.tracker
 - takeScreenshot: phase2_02_area_created
 
 # Open add-task dialog — verify effort slider is present
-- tapOn: { id: "tab:areas" }
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addTaskButton:Kitchen" }
 - assertVisible: "New task in Kitchen"
 - assertVisible: { id: "effortSlider" }
@@ -56,6 +57,6 @@ appId: com.chore.tracker
 - takeScreenshot: phase2_05_activity_feed
 
 # Switch back to Chores
-- tapOn: { id: "tab:areas" }
+- tapOn: { id: "tab:household" }
 - assertVisible: "Wipe counter"
 - takeScreenshot: phase2_06_back_to_chores

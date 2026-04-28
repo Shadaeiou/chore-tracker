@@ -18,12 +18,13 @@ appId: com.chore.tracker
 - takeScreenshot: phase2b_01_signed_in
 
 # Create area and task
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addAreaFab" }
 - tapOn: { id: "textDialogField" }
 - inputText: "Kitchen"
 - tapOn: { id: "textDialogConfirm" }
 - assertVisible: "Kitchen"
-- tapOn: { id: "tab:areas" }
+- tapOn: { id: "tab:household" }
 - tapOn: { id: "addTaskButton:Kitchen" }
 - tapOn: { id: "taskNameField" }
 - inputText: "Wipe counter"

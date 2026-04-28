@@ -93,19 +93,17 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        // Skip onboarding wizard so the FAB-driven empty state is visible
+        // Skip onboarding wizard
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("onboardingSkip").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("onboardingSkip").performClick()
 
-        // Add area via the FAB
+        // FAB lives on Household tab now — switch first
+        compose.onNodeWithTag("tab:household").performClick()
         compose.onNodeWithTag("addAreaFab").performClick()
         compose.onNodeWithTag("textDialogField").performTextInput("Bathroom")
         compose.onNodeWithTag("textDialogConfirm").performClick()
-
-        // Area cards live on the Areas tab
-        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaCard:Bathroom").fetchSemanticsNodes().isNotEmpty()
         }
