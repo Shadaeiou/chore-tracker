@@ -6,9 +6,6 @@ import com.chore.tracker.data.ActivityEntry
 import com.chore.tracker.data.Member
 import com.chore.tracker.data.WorkloadEntry
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import java.io.IOException
@@ -20,7 +17,6 @@ class RepoTest {
             session = InMemorySession(),
             api = fake,
             scope = scope,
-            pollIntervalMs = 1_000,
         )
 
     @Test fun `login persists token via session`() = runTest {
@@ -59,26 +55,6 @@ class RepoTest {
         val repo = newRepo(this, fake)
         repo.refresh()
         assertThat(repo.state.value.error).contains("network down")
-    }
-
-    @Test fun `polling refreshes every interval until stopped`() = runTest {
-        val dispatcher = StandardTestDispatcher(testScheduler)
-        val scope = CoroutineScope(dispatcher)
-        val fake = FakeApi()
-        val repo = Repo(InMemorySession(), api = fake, scope = scope, pollIntervalMs = 1_000)
-
-        repo.startPolling()
-        runCurrent()
-        advanceTimeBy(2_500)
-        runCurrent()
-        repo.stopPolling()
-        val refreshesAfterStop = fake.refreshes
-        advanceTimeBy(5_000)
-        runCurrent()
-
-        // Polled at t=0, ~1000, ~2000.
-        assertThat(refreshesAfterStop).isAtLeast(3)
-        assertThat(fake.refreshes).isEqualTo(refreshesAfterStop)
     }
 
     @Test fun `refresh populates members, activity, and workload`() = runTest {

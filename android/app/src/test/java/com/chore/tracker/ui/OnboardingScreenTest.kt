@@ -29,7 +29,6 @@ class OnboardingScreenTest {
         session = InMemorySession(initial = "fake-token"),
         api = fake,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-        pollIntervalMs = 999_999,
     )
 
     private fun seedFake(): FakeApi = FakeApi().apply {

@@ -43,7 +43,6 @@ class HomeScreenTest {
             session = InMemorySession(initial = "fake-token"),
             api = fake,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-            pollIntervalMs = 999_999,
         )
 
     @Test fun `renders areas and their tasks from repo state`() {

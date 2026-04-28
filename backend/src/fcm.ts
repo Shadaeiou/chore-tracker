@@ -77,6 +77,36 @@ export async function sendToTokens(
   payload: { title: string; body: string },
   env: Env,
 ): Promise<void> {
+  await sendFcm(tokens, env, (token) => ({
+    token,
+    notification: payload,
+    android: { notification: { channel_id: "chore_updates" } },
+  }));
+}
+
+/**
+ * Silent data-only push that wakes the client to refresh its state. No
+ * system notification is shown; the app reacts to `data.action === "refresh"`
+ * and re-pulls /api/tasks etc. Used to fan out edits (rename, add task,
+ * delete task, snooze, …) so other devices in the household stay in sync
+ * without the client polling.
+ */
+export async function sendRefreshToTokens(
+  tokens: string[],
+  env: Env,
+): Promise<void> {
+  await sendFcm(tokens, env, (token) => ({
+    token,
+    data: { action: "refresh" },
+    android: { priority: "HIGH" },
+  }));
+}
+
+async function sendFcm(
+  tokens: string[],
+  env: Env,
+  buildMessage: (token: string) => Record<string, unknown>,
+): Promise<void> {
   if (tokens.length === 0 || !env.FCM_SERVICE_ACCOUNT) return;
 
   const sa = JSON.parse(env.FCM_SERVICE_ACCOUNT) as ServiceAccount;
@@ -91,13 +121,7 @@ export async function sendToTokens(
           authorization: `Bearer ${accessToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: payload,
-            android: { notification: { channel_id: "chore_updates" } },
-          },
-        }),
+        body: JSON.stringify({ message: buildMessage(token) }),
       });
       if (!res.ok) {
         const err = await res.json<{

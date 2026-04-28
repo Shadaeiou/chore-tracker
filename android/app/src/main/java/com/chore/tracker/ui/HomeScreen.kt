@@ -70,7 +70,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -87,9 +86,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.CompleteRequest
 import com.chore.tracker.data.CreateAreaRequest
@@ -157,18 +153,10 @@ fun HomeScreen(
         }.getOrNull()?.let { pendingUpdate = it }
     }
 
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> repo.startPolling()
-                Lifecycle.Event.ON_STOP -> repo.stopPolling()
-                else -> {}
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); repo.stopPolling() }
-    }
+    // First-load: pull state once when the screen composes. Pull-to-refresh
+    // covers explicit refreshes; silent FCM data pushes (action=refresh) cover
+    // updates from other household members.
+    LaunchedEffect(Unit) { repo.refresh() }
 
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),

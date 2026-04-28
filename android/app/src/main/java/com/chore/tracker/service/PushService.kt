@@ -39,7 +39,19 @@ class PushService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        Log.d("PushService", "onMessageReceived: title=${message.notification?.title}")
+        Log.d(
+            "PushService",
+            "onMessageReceived: action=${message.data["action"]}, " +
+                "notif=${message.notification?.title}",
+        )
+        // Silent refresh: backend fans out `data: { action: "refresh" }` on any
+        // edit so other household devices stay in sync without polling. Trigger
+        // a refresh and don't surface a notification regardless of foreground.
+        if (message.data["action"] == "refresh") {
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { repo.refresh() }
+            return
+        }
+
         val isForegrounded = ProcessLifecycleOwner.get().lifecycle.currentState
             .isAtLeast(Lifecycle.State.STARTED)
 

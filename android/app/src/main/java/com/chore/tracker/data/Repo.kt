@@ -3,14 +3,10 @@ package com.chore.tracker.data
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 data class HouseholdState(
     val household: Household? = null,
@@ -39,13 +35,11 @@ internal fun jwtSub(token: String?): String? {
 class Repo(
     val session: Session,
     val api: ChoreApi = ApiFactory.create(session),
+    @Suppress("unused") // retained for parity with older test constructors
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    private val pollIntervalMs: Long = 60_000L,
 ) {
     private val _state = MutableStateFlow(HouseholdState())
     val state: StateFlow<HouseholdState> = _state.asStateFlow()
-
-    private var pollJob: Job? = null
 
     suspend fun login(email: String, password: String): AuthResponse {
         val res = api.login(LoginRequest(email, password))
@@ -117,19 +111,4 @@ class Repo(
         }
     }
 
-    /** Start a background loop that calls [refresh] every [pollIntervalMs]. Idempotent. */
-    fun startPolling() {
-        if (pollJob?.isActive == true) return
-        pollJob = scope.launch {
-            while (isActive) {
-                refresh()
-                delay(pollIntervalMs)
-            }
-        }
-    }
-
-    fun stopPolling() {
-        pollJob?.cancel()
-        pollJob = null
-    }
 }

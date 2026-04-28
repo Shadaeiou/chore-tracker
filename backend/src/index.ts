@@ -10,7 +10,7 @@ import {
   verifyPassword,
   type JwtPayload,
 } from "./auth";
-import { sendToTokens } from "./fcm";
+import { sendToTokens, sendRefreshToTokens } from "./fcm";
 
 type Bindings = {
   DB: D1Database;
@@ -23,6 +23,28 @@ type Variables = {
 };
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Fan out a silent "refresh" push to every device in the household except the
+ * actor's. Lets other people's apps re-pull state without polling. Errors are
+ * swallowed (best-effort delivery; the next manual pull-to-refresh covers
+ * anyone we miss).
+ */
+async function fanOutRefresh(
+  c: { env: Bindings; executionCtx: { waitUntil: (p: Promise<unknown>) => void } },
+  hh: string,
+  exceptUserId: string,
+): Promise<void> {
+  if (!c.env.FCM_SERVICE_ACCOUNT) return;
+  const { results } = await c.env.DB.prepare(
+    `SELECT dt.token FROM device_tokens dt
+       JOIN users u ON u.id = dt.user_id
+      WHERE u.household_id = ? AND dt.user_id != ?`,
+  ).bind(hh, exceptUserId).all<{ token: string }>();
+  const tokens = results.map((r) => r.token);
+  if (tokens.length === 0) return;
+  c.executionCtx.waitUntil(sendRefreshToTokens(tokens, c.env));
+}
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -182,7 +204,7 @@ app.get("/api/household", async (c) => {
 });
 
 app.patch("/api/household", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const body = await c.req.json<{ pausedUntil?: number | null; name?: string }>();
   const sets: string[] = [];
   const bindings: unknown[] = [];
@@ -195,6 +217,7 @@ app.patch("/api/household", async (c) => {
   bindings.push(hh);
   await c.env.DB.prepare(`UPDATE households SET ${sets.join(", ")} WHERE id = ?`)
     .bind(...bindings).run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
@@ -228,7 +251,7 @@ app.get("/api/areas", async (c) => {
 });
 
 app.post("/api/areas", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const body = await c.req.json<{
     name: string;
     icon?: string;
@@ -243,6 +266,7 @@ app.post("/api/areas", async (c) => {
   )
     .bind(id, hh, body.name, body.icon ?? null, body.sortOrder ?? 0, now)
     .run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({
     id,
     name: body.name,
@@ -253,7 +277,7 @@ app.post("/api/areas", async (c) => {
 });
 
 app.patch("/api/areas/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const id = c.req.param("id");
   const body = await c.req.json<{ name?: string; icon?: string; sortOrder?: number }>();
 
@@ -273,6 +297,7 @@ app.patch("/api/areas/:id", async (c) => {
   await c.env.DB.prepare(
     `UPDATE areas SET ${sets.join(", ")} WHERE id = ?`,
   ).bind(...bindings).run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
@@ -314,6 +339,7 @@ app.post("/api/areas/:id/copy", async (c) => {
     );
   }
   await c.env.DB.batch(stmts);
+  await fanOutRefresh(c, hh, sub);
   // Return a full Area-shaped response so kotlinx.serialization on Android can
   // deserialize it without complaining about missing fields.
   return c.json({
@@ -327,7 +353,7 @@ app.post("/api/areas/:id/copy", async (c) => {
 });
 
 app.delete("/api/areas/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const id = c.req.param("id");
   const res = await c.env.DB.prepare(
     "DELETE FROM areas WHERE id = ? AND household_id = ?",
@@ -335,6 +361,7 @@ app.delete("/api/areas/:id", async (c) => {
     .bind(id, hh)
     .run();
   if (!res.meta.changes) throw new HTTPException(404);
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
@@ -452,6 +479,7 @@ app.post("/api/tasks", async (c) => {
   )
     .bind(id, body.areaId, body.name, body.frequencyDays, assignedTo, autoRotate, effortPoints, lastDoneAt, notes, now)
     .run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({
     id,
     areaId: body.areaId,
@@ -578,7 +606,7 @@ app.post("/api/tasks/:id/complete", async (c) => {
 });
 
 app.post("/api/tasks/:id/snooze", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const taskId = c.req.param("id");
   const body = await c.req.json<{ until: number }>();
   if (!body.until || body.until <= Date.now())
@@ -593,11 +621,12 @@ app.post("/api/tasks/:id/snooze", async (c) => {
 
   await c.env.DB.prepare("UPDATE tasks SET snoozed_until = ? WHERE id = ?")
     .bind(body.until, taskId).run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
 app.patch("/api/tasks/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const id = c.req.param("id");
   const body = await c.req.json<{
     name?: string;
@@ -647,13 +676,14 @@ app.patch("/api/tasks/:id", async (c) => {
   await c.env.DB.prepare(
     `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`,
   ).bind(...bindings).run();
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
 // Undo: delete the most-recent completion for this task and recompute
 // last_done_at from whatever's left (or NULL if there are no completions).
 app.delete("/api/tasks/:id/completions/last", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const taskId = c.req.param("id");
 
   const task = await c.env.DB.prepare(
@@ -685,6 +715,7 @@ app.delete("/api/tasks/:id/completions/last", async (c) => {
        ) WHERE id = ?`,
     ).bind(taskId, taskId),
   ]);
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
@@ -764,7 +795,7 @@ app.get("/api/household/workload", async (c) => {
 
 // Delete an arbitrary completion by id (used by Activity tab undo).
 app.delete("/api/completions/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const completionId = c.req.param("id");
 
   const row = await c.env.DB.prepare(
@@ -783,11 +814,12 @@ app.delete("/api/completions/:id", async (c) => {
        ) WHERE id = ?`,
     ).bind(row.task_id, row.task_id),
   ]);
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
 app.delete("/api/tasks/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const id = c.req.param("id");
   const res = await c.env.DB.prepare(
     `DELETE FROM tasks
@@ -797,6 +829,7 @@ app.delete("/api/tasks/:id", async (c) => {
     .bind(id, hh)
     .run();
   if (!res.meta.changes) throw new HTTPException(404);
+  await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
 
