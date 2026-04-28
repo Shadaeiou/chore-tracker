@@ -1,3 +1,8 @@
 .DS_Store
 *.log
 .dev.vars
+# Firebase admin SDK service-account JSON. Contains a private RSA key —
+# never commit. Lives at the repo root after `firebase generate keys`.
+*-firebase-adminsdk-*.json
+node_modules/
+
