@@ -195,12 +195,62 @@ app.get("/api/household", async (c) => {
     .bind(hh)
     .first();
   const { results: members } = await c.env.DB.prepare(
-    `SELECT id, display_name AS displayName, email
+    `SELECT id, display_name AS displayName, email, avatar
        FROM users WHERE household_id = ? ORDER BY created_at`,
   )
     .bind(hh)
     .all();
   return c.json({ household, members });
+});
+
+// ---------- Self profile ----------
+
+const MAX_AVATAR_BYTES = 250_000;
+
+function validateAvatar(avatar: string | null): void {
+  if (avatar === null) return;
+  if (!avatar.startsWith("data:image/")) {
+    throw new HTTPException(400, { message: "avatar must be a data:image/* URL" });
+  }
+  if (avatar.length > MAX_AVATAR_BYTES) {
+    throw new HTTPException(413, { message: "avatar too large" });
+  }
+}
+
+app.get("/api/me", async (c) => {
+  const { sub } = c.get("user");
+  const me = await c.env.DB.prepare(
+    "SELECT id, email, display_name AS displayName, avatar FROM users WHERE id = ?",
+  ).bind(sub).first();
+  if (!me) throw new HTTPException(404);
+  return c.json(me);
+});
+
+app.patch("/api/me", async (c) => {
+  const { sub, hh } = c.get("user");
+  const body = await c.req.json<{ displayName?: string; avatar?: string | null }>();
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if (body.displayName !== undefined) {
+    if (!body.displayName.trim()) {
+      throw new HTTPException(400, { message: "displayName cannot be blank" });
+    }
+    sets.push("display_name = ?");
+    bindings.push(body.displayName.trim());
+  }
+  if ("avatar" in body) {
+    validateAvatar(body.avatar ?? null);
+    sets.push("avatar = ?");
+    bindings.push(body.avatar ?? null);
+  }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+  bindings.push(sub);
+  await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();
+  await fanOutRefresh(c, hh, sub);
+  const me = await c.env.DB.prepare(
+    "SELECT id, email, display_name AS displayName, avatar FROM users WHERE id = ?",
+  ).bind(sub).first();
+  return c.json(me);
 });
 
 app.patch("/api/household", async (c) => {
@@ -754,8 +804,8 @@ app.get("/api/activity", async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT c.id, c.task_id AS taskId, t.name AS taskName,
-            a.name AS areaName, u.display_name AS doneBy, c.done_at AS doneAt,
-            c.notes AS notes
+            a.name AS areaName, u.display_name AS doneBy, u.avatar AS doneByAvatar,
+            c.done_at AS doneAt, c.notes AS notes
        FROM completions c
        JOIN tasks t ON t.id = c.task_id
        JOIN areas a ON a.id = t.area_id

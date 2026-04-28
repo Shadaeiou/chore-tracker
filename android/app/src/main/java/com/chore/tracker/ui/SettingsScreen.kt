@@ -77,6 +77,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     repo: Repo? = null,
     onSignOut: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -113,6 +114,42 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .testTag("settingsScreen"),
         ) {
+            // Profile section — current avatar + display name, tap to edit.
+            if (repo != null) {
+                val members = houseState?.value?.members.orEmpty()
+                val me = members.firstOrNull { it.id == houseState?.value?.currentUserId }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenProfile)
+                        .padding(vertical = 8.dp)
+                        .testTag("profileSettingsRow"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    AvatarPreview(
+                        avatarDataUrl = me?.avatar,
+                        fallbackText = me?.displayName?.take(1)?.uppercase().orEmpty().ifBlank { "?" },
+                        size = 48,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            me?.displayName ?: "Edit profile",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            me?.email ?: "Tap to update name and photo",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("Edit", color = MaterialTheme.colorScheme.primary)
+                }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
+            }
+
             Text("Theme", style = MaterialTheme.typography.titleMedium)
             ThemeMode.entries.forEach { mode ->
                 ThemeRow(

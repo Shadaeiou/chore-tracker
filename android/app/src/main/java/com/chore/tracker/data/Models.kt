@@ -97,6 +97,7 @@ data class ActivityEntry(
     val taskName: String,
     val areaName: String,
     val doneBy: String,
+    val doneByAvatar: String? = null,
     val doneAt: Long,
     val notes: String? = null,
 )
@@ -139,7 +140,26 @@ data class CompleteRequest(
 )
 
 @Serializable
-data class Member(val id: String, val displayName: String, val email: String)
+data class Member(
+    val id: String,
+    val displayName: String,
+    val email: String,
+    val avatar: String? = null,
+)
+
+@Serializable
+data class UserProfile(
+    val id: String,
+    val email: String,
+    val displayName: String,
+    val avatar: String? = null,
+)
+
+@Serializable
+data class PatchProfileRequest(
+    val displayName: String? = null,
+    val avatar: String? = null,
+)
 
 @Serializable
 data class HouseholdResponse(val household: Household, val members: List<Member>)

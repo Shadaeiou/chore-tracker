@@ -187,19 +187,12 @@ private fun ActivityRow(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                // Initial badge for the doer
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        entry.doneBy.take(1).uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
+                // Initial badge for the doer (or the doer's uploaded avatar).
+                AvatarPreview(
+                    avatarDataUrl = entry.doneByAvatar,
+                    fallbackText = entry.doneBy.take(1).uppercase(),
+                    size = 24,
+                )
                 if (!entry.notes.isNullOrBlank()) {
                     Icon(
                         Icons.AutoMirrored.Filled.Notes,

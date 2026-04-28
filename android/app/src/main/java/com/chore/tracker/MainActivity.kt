@@ -15,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import com.chore.tracker.ui.AuthScreen
 import com.chore.tracker.ui.ChoreTheme
 import com.chore.tracker.ui.HomeScreen
+import com.chore.tracker.ui.ProfileScreen
 import com.chore.tracker.ui.SettingsScreen
 import com.chore.tracker.ui.ThemeMode
 import com.chore.tracker.ui.ThemePalette
@@ -65,7 +66,11 @@ private fun Root(app: ChoreApp) {
                         popUpTo("home") { inclusive = true }
                     }
                 },
+                onOpenProfile = { nav.navigate("profile") },
             )
+        }
+        composable("profile") {
+            ProfileScreen(repo = app.repo, onBack = { nav.popBackStack() })
         }
     }
 }

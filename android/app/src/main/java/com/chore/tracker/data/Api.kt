@@ -23,6 +23,12 @@ interface ChoreApi {
     @POST("auth/login")
     suspend fun login(@Body req: LoginRequest): AuthResponse
 
+    @GET("api/me")
+    suspend fun me(): UserProfile
+
+    @PATCH("api/me")
+    suspend fun patchMe(@Body req: PatchProfileRequest): UserProfile
+
     @GET("api/household")
     suspend fun household(): HouseholdResponse
 
