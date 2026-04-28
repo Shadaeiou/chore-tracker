@@ -82,7 +82,6 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.name }} (build ${{ steps.ver.outputs.code }})
           files: android/app/build/outputs/apk/release/app-release.apk
-          prerelease: true
           body: |
             Automated build from commit ${{ github.sha }}.
 

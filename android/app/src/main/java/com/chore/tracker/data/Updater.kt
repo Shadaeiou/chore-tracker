@@ -39,22 +39,33 @@ class Updater(
     private val client = OkHttpClient.Builder().build()
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** Hits the GitHub releases API. Returns null when there's no newer release. */
+    /**
+     * Scan recent releases and return the highest-versionCode one that's
+     * newer than the running build. Uses `/releases` (which includes
+     * pre-releases) instead of `/releases/latest` (which silently skips
+     * them). Robust to a maintainer publishing a marked-prerelease build.
+     */
     suspend fun checkForUpdate(currentVersionCode: Int): UpdateInfo? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url("https://api.github.com/repos/$owner/$repo/releases/latest")
+            .url("https://api.github.com/repos/$owner/$repo/releases?per_page=10")
             .header("Accept", "application/vnd.github+json")
             .build()
         val res = runCatching { client.newCall(req).execute() }.getOrNull() ?: return@withContext null
         res.use {
             if (!it.isSuccessful) return@withContext null
             val body = it.body?.string() ?: return@withContext null
-            val release = runCatching { json.decodeFromString<GithubRelease>(body) }.getOrNull()
-                ?: return@withContext null
-            val parsed = parseVersionFromTag(release.tagName) ?: return@withContext null
+            val releases = runCatching { json.decodeFromString<List<GithubRelease>>(body) }
+                .getOrNull() ?: return@withContext null
+
+            val best = releases.mapNotNull { rel ->
+                val parsed = parseVersionFromTag(rel.tagName) ?: return@mapNotNull null
+                val asset = rel.assets.firstOrNull { a -> a.name.endsWith(".apk") }
+                    ?: return@mapNotNull null
+                Triple(parsed, asset, rel)
+            }.maxByOrNull { (parsed, _, _) -> parsed.code } ?: return@withContext null
+
+            val (parsed, asset, release) = best
             if (parsed.code <= currentVersionCode) return@withContext null
-            val asset = release.assets.firstOrNull { a -> a.name.endsWith(".apk") }
-                ?: return@withContext null
             UpdateInfo(
                 versionCode = parsed.code,
                 versionName = parsed.name,
