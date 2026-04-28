@@ -490,9 +490,11 @@ app.get("/api/task-templates", async (c) => {
 app.post("/api/tasks/:id/complete", async (c) => {
   const { sub, hh } = c.get("user");
   const taskId = c.req.param("id");
-  // Optional retroactive timestamp + per-completion notes; body may be empty.
-  const body = await c.req.json<{ at?: number; notes?: string }>()
-    .catch(() => ({} as { at?: number; notes?: string }));
+  // Optional retroactive timestamp, per-completion notes, and an override for
+  // who completed the task (defaults to the JWT user). `completedBy` lets a
+  // member log a completion on behalf of someone else in the same household.
+  const body = await c.req.json<{ at?: number; notes?: string; completedBy?: string }>()
+    .catch(() => ({} as { at?: number; notes?: string; completedBy?: string }));
 
   const task = await c.env.DB.prepare(
     `SELECT t.id, t.name, t.auto_rotate, t.assigned_to, t.created_at FROM tasks t
@@ -502,6 +504,16 @@ app.post("/api/tasks/:id/complete", async (c) => {
     .bind(taskId, hh)
     .first<{ id: string; name: string; auto_rotate: number; assigned_to: string | null; created_at: number }>();
   if (!task) throw new HTTPException(404);
+
+  // If completedBy is provided, verify it's a member of the same household.
+  let completedBy = sub;
+  if (body.completedBy && body.completedBy !== sub) {
+    const member = await c.env.DB.prepare(
+      "SELECT id FROM users WHERE id = ? AND household_id = ?",
+    ).bind(body.completedBy, hh).first<{ id: string }>();
+    if (!member) throw new HTTPException(400, { message: "completedBy is not a member of this household" });
+    completedBy = body.completedBy;
+  }
 
   const realNow = Date.now();
   let completedAt = realNow;
@@ -516,7 +528,7 @@ app.post("/api/tasks/:id/complete", async (c) => {
   const stmts: D1PreparedStatement[] = [
     c.env.DB.prepare(
       "INSERT INTO completions (id, task_id, user_id, done_at, notes) VALUES (?, ?, ?, ?, ?)",
-    ).bind(completionId, taskId, sub, completedAt, completionNotes),
+    ).bind(completionId, taskId, completedBy, completedAt, completionNotes),
     // last_done_at uses MAX so an older retroactive completion doesn't overwrite a newer one.
     c.env.DB.prepare(
       `UPDATE tasks SET last_done_at = (
