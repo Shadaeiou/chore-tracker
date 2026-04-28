@@ -20,6 +20,7 @@ appId: com.chore.tracker
 - tapOn: { id: "textDialogField" }
 - inputText: "Kitchen"
 - tapOn: { id: "textDialogConfirm" }
+- tapOn: { id: "tab:areas" }
 - tapOn: { id: "addTaskButton:Kitchen" }
 - tapOn: { id: "taskNameField" }
 - inputText: "Wipe counters"

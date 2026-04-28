@@ -200,7 +200,8 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            if (selectedTab == 0) {
+            // FAB available on Plan and Areas tabs (not Activity).
+            if (selectedTab != 2) {
                 FloatingActionButton(
                     modifier = Modifier.testTag("addAreaFab"),
                     onClick = { showAddArea = true },
@@ -215,17 +216,44 @@ fun HomeScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    modifier = Modifier.testTag("tab:chores"),
-                    text = { Text("Chores") },
+                    modifier = Modifier.testTag("tab:plan"),
+                    text = { Text("Plan") },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
+                    modifier = Modifier.testTag("tab:areas"),
+                    text = { Text("Areas") },
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     modifier = Modifier.testTag("tab:activity"),
                     text = { Text("Activity") },
                 )
             }
+            // Shared callback used by Plan and Areas tabs.
+            val onCompleteTask: (Task) -> Unit = { task ->
+                scope.launch {
+                    runCatching { repo.api.completeTask(task.id) }
+                        .onSuccess {
+                            repo.refresh()
+                            val result = snackbarHost.showSnackbar(
+                                message = "Marked done",
+                                actionLabel = "Undo",
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                runCatching { repo.api.undoLastCompletion(task.id) }
+                                    .onSuccess { repo.refresh() }
+                                    .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
+                            }
+                        }
+                        .onFailure { snackbarHost.showSnackbar("Failed to complete: ${it.message}") }
+                }
+            }
+
             when (selectedTab) {
+                // ── Plan tab: flat task list across all areas, sorted by dueness ──
                 0 -> PullToRefreshBox(
                     state = pullState,
                     isRefreshing = state.isLoading,
@@ -233,46 +261,7 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     Column(Modifier.fillMaxSize()) {
-                        state.error?.let {
-                            Text(
-                                it,
-                                modifier = Modifier.padding(16.dp).testTag("homeError"),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        if (state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("vacationBanner"),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Default.BeachAccess,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    )
-                                    Spacer(Modifier.size(8.dp))
-                                    Text(
-                                        "Vacation mode — indicators paused",
-                                        modifier = Modifier.weight(1f),
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    )
-                                    TextButton(
-                                        modifier = Modifier.testTag("resumeButton"),
-                                        onClick = {
-                                            scope.launch {
-                                                runCatching { repo.api.patchHousehold(PatchHouseholdRequest(null)) }
-                                                    .onSuccess { repo.refresh() }
-                                                    .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
-                                            }
-                                        },
-                                    ) { Text("Resume") }
-                                }
-                            }
-                        }
+                        TabHeader(state, repo, scope, snackbarHost)
                         if (state.workload.isNotEmpty()) {
                             WorkloadCard(
                                 entries = state.workload,
@@ -282,14 +271,39 @@ fun HomeScreen(
                         if (state.areas.isEmpty()) {
                             if (wizardSkipped) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Tap + to add your first area")
+                                    Text("Switch to Areas tab and tap + to add your first area")
                                 }
                             } else {
                                 OnboardingScreen(
                                     repo = repo,
                                     onSkip = { wizardSkipped = true },
-                                    onComplete = { /* refresh already happened in wizard */ },
+                                    onComplete = {},
                                 )
+                            }
+                        } else {
+                            PlanList(
+                                state = state,
+                                onComplete = onCompleteTask,
+                                onEditTask = { editingTask = it },
+                                onDeleteTask = { deletingTask = it },
+                                onSnoozeTask = { snoozingTask = it },
+                                onMarkDoneAt = { retroactiveTask = it },
+                            )
+                        }
+                    }
+                }
+                // ── Areas tab: hierarchical view for managing areas + tasks ──
+                1 -> PullToRefreshBox(
+                    state = pullState,
+                    isRefreshing = state.isLoading,
+                    onRefresh = { scope.launch { repo.refresh() } },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        TabHeader(state, repo, scope, snackbarHost)
+                        if (state.areas.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Tap + to add your first area")
                             }
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
@@ -304,24 +318,7 @@ fun HomeScreen(
                                         onDeleteTask = { task -> deletingTask = task },
                                         onSnoozeTask = { task -> snoozingTask = task },
                                         onMarkDoneAt = { task -> retroactiveTask = task },
-                                        onComplete = { task ->
-                                            scope.launch {
-                                                runCatching { repo.api.completeTask(task.id) }
-                                                    .onSuccess {
-                                                        repo.refresh()
-                                                        val result = snackbarHost.showSnackbar(
-                                                            message = "Marked done",
-                                                            actionLabel = "Undo",
-                                                        )
-                                                        if (result == SnackbarResult.ActionPerformed) {
-                                                            runCatching { repo.api.undoLastCompletion(task.id) }
-                                                                .onSuccess { repo.refresh() }
-                                                                .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
-                                                        }
-                                                    }
-                                                    .onFailure { snackbarHost.showSnackbar("Failed to complete: ${it.message}") }
-                                            }
-                                        },
+                                        onComplete = onCompleteTask,
                                     )
                                     Spacer(Modifier.height(8.dp))
                                 }
@@ -329,7 +326,8 @@ fun HomeScreen(
                         }
                     }
                 }
-                1 -> ActivityScreen(
+                // ── Activity tab ─────────────────────────────────────────────
+                2 -> ActivityScreen(
                     activity = state.activity,
                     modifier = Modifier.fillMaxSize(),
                     onUndo = { entry ->
@@ -552,6 +550,95 @@ fun HomeScreen(
     }
 }
 
+/** Shared header for Plan and Areas tabs: error message + vacation banner. */
+@Composable
+private fun TabHeader(
+    state: com.chore.tracker.data.HouseholdState,
+    repo: Repo,
+    scope: kotlinx.coroutines.CoroutineScope,
+    snackbarHost: SnackbarHostState,
+) {
+    state.error?.let {
+        Text(
+            it,
+            modifier = Modifier.padding(16.dp).testTag("homeError"),
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("vacationBanner"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.BeachAccess, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Vacation mode — indicators paused",
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                TextButton(
+                    modifier = Modifier.testTag("resumeButton"),
+                    onClick = {
+                        scope.launch {
+                            runCatching { repo.api.patchHousehold(PatchHouseholdRequest(null)) }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Failed: ${it.message}") }
+                        }
+                    },
+                ) { Text("Resume") }
+            }
+        }
+    }
+}
+
+/** Plan tab content: flat task list sorted by dirtiness desc, hides snoozed tasks. */
+@Composable
+private fun PlanList(
+    state: com.chore.tracker.data.HouseholdState,
+    onComplete: (Task) -> Unit,
+    onEditTask: (Task) -> Unit,
+    onDeleteTask: (Task) -> Unit,
+    onSnoozeTask: (Task) -> Unit,
+    onMarkDoneAt: (Task) -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val visibleTasks = remember(state.tasks) {
+        state.tasks
+            .filter { it.snoozedUntil == null || it.snoozedUntil <= now }
+            .sortedByDescending { it.dirtiness(now) }
+    }
+    val areaNamesById = remember(state.areas) { state.areas.associate { it.id to it.name } }
+
+    if (visibleTasks.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Nothing needs doing right now 🎉", style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
+
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+        items(visibleTasks, key = { it.id }) { task ->
+            TaskRow(
+                task = task,
+                areaName = areaNamesById[task.areaId],
+                onComplete = { onComplete(task) },
+                onEdit = { onEditTask(task) },
+                onDelete = { onDeleteTask(task) },
+                onSnooze = { onSnoozeTask(task) },
+                onMarkDoneAt = { onMarkDoneAt(task) },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AreaCard(
@@ -635,6 +722,7 @@ private fun TaskRow(
     onDelete: () -> Unit,
     onSnooze: () -> Unit,
     onMarkDoneAt: () -> Unit,
+    areaName: String? = null,
 ) {
     val ratio = task.dirtiness().toFloat()
     val color = when {
@@ -659,7 +747,16 @@ private fun TaskRow(
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(task.name, modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(task.name)
+                        if (areaName != null) {
+                            Text(
+                                areaName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     task.assignedToName?.let { name ->
                         Box(
                             modifier = Modifier

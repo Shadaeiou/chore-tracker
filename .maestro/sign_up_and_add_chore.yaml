@@ -21,7 +21,7 @@ appId: com.chore.tracker
 - inputText: "E2E house"
 - tapOn:
     id: "submitButton"
-- assertVisible: "Tap + to add your first area"
+- tapOn: { id: "onboardingSkip" }
 - tapOn:
     id: "addAreaFab"
 - tapOn:

@@ -14,7 +14,7 @@ appId: com.chore.tracker
 - tapOn: { id: "householdNameField" }
 - inputText: "Phase2b home"
 - tapOn: { id: "submitButton" }
-- assertVisible: "Tap + to add your first area"
+- tapOn: { id: "onboardingSkip" }
 - takeScreenshot: phase2b_01_signed_in
 
 # Create area and task
@@ -23,6 +23,7 @@ appId: com.chore.tracker
 - inputText: "Kitchen"
 - tapOn: { id: "textDialogConfirm" }
 - assertVisible: "Kitchen"
+- tapOn: { id: "tab:areas" }
 - tapOn: { id: "addTaskButton:Kitchen" }
 - tapOn: { id: "taskNameField" }
 - inputText: "Wipe counter"

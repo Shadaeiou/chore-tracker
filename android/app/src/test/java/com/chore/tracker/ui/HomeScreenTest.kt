@@ -52,12 +52,18 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        // Plan tab (default) shows the task with area context
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("taskRow:Mop floor").assertIsDisplayed()
+
+        // Switch to Areas tab and the area card appears
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaCard:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("areaCard:Kitchen").assertIsDisplayed()
-        compose.onNodeWithTag("taskRow:Mop floor").assertIsDisplayed()
-        compose.onNodeWithText("Tap + to add your first area").assertDoesNotExist()
     }
 
     @Test fun `empty state shows onboarding wizard`() {
@@ -68,13 +74,15 @@ class HomeScreenTest {
         }
     }
 
-    @Test fun `skipping wizard shows the manual empty state`() {
+    @Test fun `skipping wizard then switching to Areas tab shows manual empty state`() {
         val repo = newRepo(FakeApi())
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("onboardingSkip").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("onboardingSkip").performClick()
+        // Areas tab shows "Tap +" empty state with the FAB available
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithText("Tap + to add your first area").fetchSemanticsNodes().isNotEmpty()
         }
@@ -85,16 +93,19 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        // Skip onboarding wizard to access manual add flow
+        // Skip onboarding wizard so the FAB-driven empty state is visible
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("onboardingSkip").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("onboardingSkip").performClick()
 
-        // Add area
+        // Add area via the FAB
         compose.onNodeWithTag("addAreaFab").performClick()
         compose.onNodeWithTag("textDialogField").performTextInput("Bathroom")
         compose.onNodeWithTag("textDialogConfirm").performClick()
+
+        // Area cards live on the Areas tab
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaCard:Bathroom").fetchSemanticsNodes().isNotEmpty()
         }
@@ -179,10 +190,11 @@ class HomeScreenTest {
         assertThat(opened).isTrue()
     }
 
-    @Test fun `chores and activity tabs are present`() {
+    @Test fun `plan areas and activity tabs are present`() {
         val repo = newRepo(FakeApi())
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-        compose.onNodeWithTag("tab:chores").assertIsDisplayed()
+        compose.onNodeWithTag("tab:plan").assertIsDisplayed()
+        compose.onNodeWithTag("tab:areas").assertIsDisplayed()
         compose.onNodeWithTag("tab:activity").assertIsDisplayed()
     }
 
@@ -272,6 +284,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -290,6 +303,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -416,6 +430,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        compose.onNodeWithTag("tab:areas").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("addTaskButton:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
