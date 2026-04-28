@@ -131,8 +131,9 @@ fun HomeScreen(
     var selectedAreaIds by remember { mutableStateOf(setOf<String>()) }
     var householdSearchQuery by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
-    // Swipe-left opens snooze/delete; swipe-right opens the unified complete dialog.
-    var snoozingTask by remember { mutableStateOf<Task?>(null) }
+    // Swipe-left opens snooze (+ delete on Household); swipe-right opens the
+    // unified complete dialog.
+    var snoozingTask by remember { mutableStateOf<SnoozeAction?>(null) }
     var notesCompletionTask by remember { mutableStateOf<Task?>(null) }
     var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
@@ -273,9 +274,8 @@ fun HomeScreen(
                         } else {
                             TodayList(
                                 state = state,
-                                onEditTask = { editingTask = it },
                                 onSwipeRight = { notesCompletionTask = it },
-                                onSwipeLeft = { snoozingTask = it },
+                                onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
                             )
                         }
                     }
@@ -405,7 +405,7 @@ fun HomeScreen(
                                             }
                                         },
                                         onSwipeRightTask = { task -> notesCompletionTask = task },
-                                        onSwipeLeftTask = { task -> snoozingTask = task },
+                                        onSwipeLeftTask = { task -> snoozingTask = SnoozeAction(task, allowDelete = true) },
                                     )
                                     Spacer(Modifier.height(8.dp))
                                 }
@@ -648,7 +648,7 @@ fun HomeScreen(
     }
 
     // ── Snooze or delete (swipe-left) ─────────────────────────────────────────
-    snoozingTask?.let { task ->
+    snoozingTask?.let { (task, allowDelete) ->
         SnoozeOrDeleteDialog(
             task = task,
             onDismiss = { snoozingTask = null },
@@ -660,14 +660,16 @@ fun HomeScreen(
                         .onFailure { snackbarHost.showSnackbar("Snooze failed: ${it.message}") }
                 }
             },
-            onDelete = {
-                snoozingTask = null
-                scope.launch {
-                    runCatching { repo.api.deleteTask(task.id) }
-                        .onSuccess { repo.refresh() }
-                        .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
+            onDelete = if (allowDelete) {
+                {
+                    snoozingTask = null
+                    scope.launch {
+                        runCatching { repo.api.deleteTask(task.id) }
+                            .onSuccess { repo.refresh() }
+                            .onFailure { snackbarHost.showSnackbar("Failed to delete task: ${it.message}") }
+                    }
                 }
-            },
+            } else null,
         )
     }
 
@@ -951,7 +953,6 @@ private fun TabHeader(
 @Composable
 private fun TodayList(
     state: com.chore.tracker.data.HouseholdState,
-    onEditTask: (Task) -> Unit,
     onSwipeRight: (Task) -> Unit,
     onSwipeLeft: (Task) -> Unit,
 ) {
@@ -1002,7 +1003,7 @@ private fun TodayList(
             TaskRow(
                 task = task,
                 areaName = areaNamesById[task.areaId],
-                onTap = { onEditTask(task) },
+                onTap = null,  // Today is read-only triage; edit lives on Household
                 onSwipeRight = { onSwipeRight(task) },
                 onSwipeLeft = { onSwipeLeft(task) },
             )
@@ -1179,11 +1180,11 @@ private fun SelectableTaskRow(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TaskRow(
     task: Task,
-    onTap: () -> Unit,
+    onTap: (() -> Unit)?,
     onSwipeRight: () -> Unit,
     onSwipeLeft: () -> Unit,
     areaName: String? = null,
@@ -1195,13 +1196,6 @@ private fun TaskRow(
     val startOfToday = (now / dayMs) * dayMs
     val startOfTomorrow = startOfToday + dayMs
 
-    // Three-color status:
-    // - red: overdue (due before today)
-    // - yellow: due today (due is in [startOfToday, startOfTomorrow))
-    // - green: due in the future
-    // A task that's never been done is treated as "due now" (red) unless
-    // freq pushes it out — which mirrors the behavior of the existing
-    // `dirtiness()` helper.
     val statusColor = when {
         task.lastDoneAt == null -> Color(0xFFD32F2F)
         due < startOfToday -> Color(0xFFD32F2F)
@@ -1219,10 +1213,14 @@ private fun TaskRow(
         },
         positionalThreshold = { distance -> distance * 0.3f },
     )
+    val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
 
     SwipeToDismissBox(
         state = swipeState,
-        modifier = Modifier.testTag("taskRow:${task.name}"),
+        modifier = Modifier
+            .padding(vertical = 3.dp)
+            .testTag("taskRow:${task.name}"),
         backgroundContent = {
             val direction = swipeState.dismissDirection
             val bg = when (direction) {
@@ -1233,7 +1231,7 @@ private fun TaskRow(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(bg)
+                    .background(bg, rowShape)
                     .padding(horizontal = 20.dp),
             ) {
                 when (direction) {
@@ -1254,88 +1252,104 @@ private fun TaskRow(
             }
         },
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .clickable(onClick = onTap)
-                .padding(vertical = 8.dp, horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        androidx.compose.material3.Surface(
+            shape = rowShape,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            // Status circle
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(14.dp)
-                    .background(statusColor, CircleShape)
-                    .testTag("statusDot:${task.name}"),
-            )
-            Spacer(Modifier.size(12.dp))
-            // Center column: name + secondary line
-            Column(Modifier.weight(1f)) {
-                Text(task.name, style = MaterialTheme.typography.bodyLarge)
-                val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
-                val secondary = when {
-                    snoozed -> {
+                    .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
+                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Status dot
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(statusColor, CircleShape)
+                        .testTag("statusDot:${task.name}"),
+                )
+                Spacer(Modifier.size(12.dp))
+                // Title + tag row
+                Column(Modifier.weight(1f)) {
+                    Text(task.name, style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.size(4.dp))
+                    if (snoozed) {
                         val days = ((task.snoozedUntil!! - now) / dayMs).coerceAtLeast(0)
-                        "snoozed · $days day${if (days == 1L) "" else "s"} left"
-                    }
-                    else -> {
-                        val areaPart = areaName?.let { "$it · " } ?: ""
-                        "${areaPart}every ${task.frequencyDays}d"
+                        Text(
+                            "snoozed · $days day${if (days == 1L) "" else "s"} left",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            areaName?.let { TagChip(it) }
+                            TagChip("${task.frequencyDays}d")
+                            task.assignedToName?.let { TagChip(it) }
+                            if (task.effortPoints > 1) {
+                                TagChip("E:${task.effortPoints}")
+                            }
+                            if (!task.notes.isNullOrBlank()) {
+                                TagChip(
+                                    text = "notes",
+                                    leadingIcon = Icons.AutoMirrored.Filled.Notes,
+                                    testTag = "taskNotes:${task.name}",
+                                )
+                            }
+                        }
                     }
                 }
-                Text(
-                    secondary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (snoozed) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // Right column: last-done summary on top, icons row beneath
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    formatLastDone(task.lastDoneAt, now),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                task.lastDoneBy?.let { by ->
+                Spacer(Modifier.size(8.dp))
+                // Right column: last-done time + by
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        "by $by",
+                        formatLastDone(task.lastDoneAt, now),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                Spacer(Modifier.size(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!task.notes.isNullOrBlank()) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Notes,
-                            contentDescription = "Has notes",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .testTag("taskNotes:${task.name}"),
+                    task.lastDoneBy?.let { by ->
+                        Text(
+                            "by $by",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(Modifier.size(6.dp))
-                    }
-                    task.assignedToName?.let { name ->
-                        Box(
-                            modifier = Modifier
-                                .size(24.dp)
-                                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-                                .testTag("assigneeBadge:${task.name}"),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                name.take(1).uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TagChip(
+    text: String,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    testTag: String? = null,
+) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.secondaryContainer, shape)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                leadingIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(12.dp),
+            )
+            Spacer(Modifier.size(3.dp))
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
 
@@ -1581,7 +1595,7 @@ private fun SnoozeOrDeleteDialog(
     task: Task,
     onDismiss: () -> Unit,
     onSnooze: (until: Long) -> Unit,
-    onDelete: () -> Unit,
+    onDelete: (() -> Unit)?,
 ) {
     var amount by remember { mutableStateOf("1") }
     var unit by remember { mutableStateOf(SnoozeUnit.DAYS) }
@@ -1659,10 +1673,12 @@ private fun SnoozeOrDeleteDialog(
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onDismiss) { Text("Cancel") }
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.testTag("deleteTaskConfirm"),
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                if (onDelete != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        modifier = Modifier.testTag("deleteTaskConfirm"),
+                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }
             }
         },
     )
@@ -1674,6 +1690,8 @@ private enum class SnoozeUnit(val label: String) {
     MONTHS("Months"),
     YEARS("Years"),
 }
+
+private data class SnoozeAction(val task: Task, val allowDelete: Boolean)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -618,8 +618,10 @@ app.patch("/api/tasks/:id", async (c) => {
 
   const sets: string[] = [];
   const bindings: unknown[] = [];
-  if (body.areaId !== undefined) {
+  if (body.areaId) {
     // Moving a task to a different area is allowed only within the same household.
+    // (Truthy check skips both `undefined` and `null` — clients that include
+    // areaId: null to mean "no change" shouldn't trigger validation.)
     const newArea = await c.env.DB.prepare(
       "SELECT id FROM areas WHERE id = ? AND household_id = ?",
     ).bind(body.areaId, hh).first();

@@ -121,7 +121,8 @@ class HomeScreenTest {
         assertThat(fake.createdTasks.map { it.name }).containsExactly("Scrub tub")
     }
 
-    @Test fun `tapping a task row opens the edit dialog`() {
+    @Test fun `tapping a task row on household tab opens the edit dialog`() {
+        // Today tab is read-only — tap-to-edit only works on Household.
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
             tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
@@ -129,6 +130,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("taskRow:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
@@ -214,7 +216,9 @@ class HomeScreenTest {
         compose.onNodeWithTag("workloadName:Bob").assertIsDisplayed()
     }
 
-    @Test fun `swipe left on task opens snooze or delete dialog`() {
+    @Test fun `swipe left on today task offers snooze but not delete`() {
+        // Today is read-only triage. Swipe-left should let you snooze but
+        // never hard-delete — that path lives on Household.
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
             tasks.add(Task("t1", "a1", "Mop floor", 7, null, null, 0))
@@ -230,7 +234,8 @@ class HomeScreenTest {
             compose.onAllNodesWithTag("snoozeOrDeleteDialog:Mop floor").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("snoozeAmountField").assertIsDisplayed()
-        compose.onNodeWithTag("deleteTaskConfirm").assertIsDisplayed()
+        compose.onAllNodesWithTag("deleteTaskConfirm")
+            .fetchSemanticsNodes().let { assertThat(it).isEmpty() }
     }
 
     @Test fun `swipe right on task opens complete dialog`() {

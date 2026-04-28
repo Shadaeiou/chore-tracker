@@ -18,12 +18,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -144,7 +146,13 @@ private fun ActivityRow(
     onLongPress: (() -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    Box {
+    Box(modifier = Modifier.padding(vertical = 3.dp)) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -154,7 +162,7 @@ private fun ActivityRow(
                         { menuExpanded = true }
                     } else null,
                 )
-                .padding(vertical = 10.dp)
+                .padding(vertical = 10.dp, horizontal = 12.dp)
                 .testTag("activityRow:${entry.taskName}"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -203,6 +211,7 @@ private fun ActivityRow(
                     )
                 }
             }
+        }
         }
         if (onLongPress != null) {
             DropdownMenu(
