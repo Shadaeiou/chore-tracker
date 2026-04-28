@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -416,16 +417,25 @@ fun HomeScreen(
         }
     }
 
-    // ── Add area ──────────────────────────────────────────────────────────────
+    // ── Add area(s) ───────────────────────────────────────────────────────────
     if (showAddArea) {
         AddAreaDialog(
+            existingAreaNames = state.areas.map { it.name.lowercase() }.toSet(),
             onDismiss = { showAddArea = false },
-            onConfirm = { name ->
+            onConfirm = { names ->
                 showAddArea = false
                 scope.launch {
-                    runCatching { repo.api.createArea(CreateAreaRequest(name)) }
-                        .onSuccess { repo.refresh() }
-                        .onFailure { snackbarHost.showSnackbar("Failed to create area: ${it.message}") }
+                    var failures = 0
+                    names.forEach { name ->
+                        runCatching { repo.api.createArea(CreateAreaRequest(name)) }
+                            .onFailure { failures++ }
+                    }
+                    repo.refresh()
+                    if (failures == 0 && names.size > 1) {
+                        snackbarHost.showSnackbar("Added ${names.size} areas")
+                    } else if (failures > 0) {
+                        snackbarHost.showSnackbar("$failures of ${names.size} adds failed")
+                    }
                 }
             },
         )
@@ -1336,37 +1346,54 @@ private fun TextDialog(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddAreaDialog(
+    existingAreaNames: Set<String>,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (List<String>) -> Unit,
 ) {
     // Match the room labels from the onboarding wizard so the lists never diverge.
-    val suggestions = remember {
+    val allSuggestions = remember {
         listOf(
             "Kitchen", "Bathroom", "Bedroom", "Living room", "Laundry",
             "Outdoor", "Whole home", "Pets", "Kids", "Seasonal",
             "Errands", "Vehicle", "Personal", "Financial", "Plants", "Family",
         )
     }
-    var value by remember { mutableStateOf("") }
+    val suggestions = remember(existingAreaNames, allSuggestions) {
+        allSuggestions.filter { it.lowercase() !in existingAreaNames }
+    }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var custom by remember { mutableStateOf("") }
+
+    val pendingCount = selected.size + (if (custom.isNotBlank()) 1 else 0)
+
     AlertDialog(
         modifier = Modifier.testTag("addAreaDialog"),
         onDismissRequest = onDismiss,
-        title = { Text("New area") },
+        title = { Text("Add areas") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Pick a common room or type your own:", style = MaterialTheme.typography.bodySmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    suggestions.forEach { name ->
-                        AssistChip(
-                            onClick = { value = name },
-                            label = { Text(name) },
-                            modifier = Modifier.testTag("areaSuggestion:$name"),
-                        )
+                if (suggestions.isNotEmpty()) {
+                    Text("Pick any common rooms to add:", style = MaterialTheme.typography.bodySmall)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        suggestions.forEach { name ->
+                            FilterChip(
+                                selected = name in selected,
+                                onClick = {
+                                    selected = if (name in selected) selected - name else selected + name
+                                },
+                                label = { Text(name) },
+                                modifier = Modifier.testTag("areaSuggestion:$name"),
+                            )
+                        }
                     }
                 }
+                Text("Or type a custom name:", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
-                    value,
-                    { value = it },
+                    custom,
+                    { custom = it },
                     label = { Text("Area name") },
                     modifier = Modifier.fillMaxWidth().testTag("textDialogField"),
                 )
@@ -1374,10 +1401,16 @@ private fun AddAreaDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = value.isNotBlank(),
+                enabled = pendingCount > 0,
                 modifier = Modifier.testTag("textDialogConfirm"),
-                onClick = { onConfirm(value.trim()) },
-            ) { Text("Add") }
+                onClick = {
+                    val names = buildList {
+                        addAll(selected)
+                        if (custom.isNotBlank()) add(custom.trim())
+                    }
+                    onConfirm(names)
+                },
+            ) { Text(if (pendingCount > 0) "Add $pendingCount" else "Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

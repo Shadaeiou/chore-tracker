@@ -966,8 +966,10 @@ describe("POST /api/areas/:id/copy", () => {
     const newAreaTasks = allTasks.filter((t) => t.areaId === result.id);
     expect(newAreaTasks).toHaveLength(2);
     expect(newAreaTasks.map((t) => t.name).sort()).toEqual(["Mop floor", "Scrub tub"]);
-    // None of the copied tasks should have a lastDoneAt yet
-    expect(newAreaTasks.every((t) => t.lastDoneAt === null)).toBe(true);
+    // Copied tasks are seeded with lastDoneAt = now (so they start green, not red).
+    // No completion records should be carried over though — the lastDoneAt is just
+    // a stamp on the task row, not a real completion.
+    expect(newAreaTasks.every((t) => t.lastDoneAt !== null)).toBe(true);
   });
 
   it("rejects copy of another household's area", async () => {

@@ -303,15 +303,26 @@ app.post("/api/areas/:id/copy", async (c) => {
     ).bind(newAreaId, hh, body.name.trim(), source.icon, source.sort_order, now),
   ];
   for (const t of tasks) {
+    // Seed last_done_at = now so copied tasks start green, matching the UX
+    // for manually-created tasks. Avoids the "wall of red" right after copy.
     stmts.push(
       c.env.DB.prepare(
         `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-      ).bind(newId(), newAreaId, t.name, t.frequency_days, sub, t.auto_rotate, t.effort_points, now),
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(newId(), newAreaId, t.name, t.frequency_days, sub, t.auto_rotate, t.effort_points, now, now),
     );
   }
   await c.env.DB.batch(stmts);
-  return c.json({ id: newAreaId, name: body.name.trim(), copiedTasks: tasks.length });
+  // Return a full Area-shaped response so kotlinx.serialization on Android can
+  // deserialize it without complaining about missing fields.
+  return c.json({
+    id: newAreaId,
+    name: body.name.trim(),
+    icon: source.icon,
+    sortOrder: source.sort_order,
+    createdAt: now,
+    copiedTasks: tasks.length,
+  });
 });
 
 app.delete("/api/areas/:id", async (c) => {
