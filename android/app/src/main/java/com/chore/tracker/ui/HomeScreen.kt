@@ -1708,10 +1708,20 @@ private fun TaskFormDialog(
 ) {
     var name by remember { mutableStateOf(initialTask?.name ?: "") }
     var freq by remember { mutableStateOf(initialTask?.frequencyDays?.toString() ?: "7") }
-    val initialMember = initialTask?.assignedTo?.let { id -> members.firstOrNull { it.id == id } }
-        ?: members.firstOrNull()
+    // For an existing task, "no assigneeId" really means Unassigned — don't
+    // fall back to the first member or we'll silently re-assign on edit. New
+    // tasks default to the first member as a friendlier "assigned to me".
+    val initialMember = if (initialTask != null) {
+        initialTask.assignedTo?.let { id -> members.firstOrNull { it.id == id } }
+    } else {
+        members.firstOrNull()
+    }
     var selectedMember by remember { mutableStateOf<Member?>(initialMember) }
+    // Auto-rotate doesn't make sense without an assignee — without one, there's
+    // no current holder to rotate from. Force off + disable the toggle when
+    // unassigned.
     var autoRotate by remember { mutableStateOf(initialTask?.autoRotate ?: false) }
+    if (selectedMember == null && autoRotate) autoRotate = false
     var effortPoints by remember { mutableFloatStateOf(initialTask?.effortPoints?.toFloat() ?: 1f) }
     var notes by remember { mutableStateOf(initialTask?.notes ?: "") }
     val initialArea = initialTask?.let { t -> areas.firstOrNull { it.id == t.areaId } }
@@ -1811,10 +1821,25 @@ private fun TaskFormDialog(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Auto-rotate", modifier = Modifier.weight(1f))
+                        val rotateEnabled = selectedMember != null
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Auto-rotate",
+                                color = if (rotateEnabled) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                            )
+                            if (!rotateEnabled) {
+                                Text(
+                                    "Assign to a member to rotate",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         Switch(
                             checked = autoRotate,
                             onCheckedChange = { autoRotate = it },
+                            enabled = rotateEnabled,
                             modifier = Modifier.testTag("autoRotateToggle"),
                         )
                     }
