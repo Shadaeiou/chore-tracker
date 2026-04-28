@@ -223,14 +223,14 @@ fun HomeScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    modifier = Modifier.testTag("tab:plan"),
-                    text = { Text("Plan") },
+                    modifier = Modifier.testTag("tab:today"),
+                    text = { Text("Today") },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    modifier = Modifier.testTag("tab:areas"),
-                    text = { Text("Areas") },
+                    modifier = Modifier.testTag("tab:household"),
+                    text = { Text("Household") },
                 )
                 Tab(
                     selected = selectedTab == 2,
@@ -260,7 +260,7 @@ fun HomeScreen(
             }
 
             when (selectedTab) {
-                // ── Plan tab: flat task list across all areas, sorted by dueness ──
+                // ── Today tab: tasks due today or earlier, no workload here ──
                 0 -> PullToRefreshBox(
                     state = pullState,
                     isRefreshing = state.isLoading,
@@ -269,16 +269,10 @@ fun HomeScreen(
                 ) {
                     Column(Modifier.fillMaxSize()) {
                         TabHeader(state, repo, scope, snackbarHost)
-                        if (state.workload.isNotEmpty()) {
-                            WorkloadCard(
-                                entries = state.workload,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            )
-                        }
                         if (state.areas.isEmpty()) {
                             if (wizardSkipped) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Switch to Areas tab and tap + to add your first area")
+                                    Text("Switch to Household tab and tap + to add your first area")
                                 }
                             } else {
                                 OnboardingScreen(
@@ -288,7 +282,7 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            PlanList(
+                            TodayList(
                                 state = state,
                                 onComplete = onCompleteTask,
                                 onEditTask = { editingTask = it },
@@ -336,6 +330,7 @@ fun HomeScreen(
                 // ── Activity tab ─────────────────────────────────────────────
                 2 -> ActivityScreen(
                     activity = state.activity,
+                    workload = state.workload,
                     modifier = Modifier.fillMaxSize(),
                     onUndo = { entry ->
                         scope.launch {
@@ -664,9 +659,9 @@ private fun TabHeader(
     }
 }
 
-/** Plan tab content: flat task list sorted by dirtiness desc, hides snoozed tasks. */
+/** Today tab content: tasks whose due date is today or earlier (date-based, not %). */
 @Composable
-private fun PlanList(
+private fun TodayList(
     state: com.chore.tracker.data.HouseholdState,
     onComplete: (Task) -> Unit,
     onEditTask: (Task) -> Unit,
@@ -675,16 +670,40 @@ private fun PlanList(
     onMarkDoneAt: (Task) -> Unit,
 ) {
     val now = System.currentTimeMillis()
-    val visibleTasks = remember(state.tasks) {
+    val startOfTomorrow = remember(now) {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = now
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+            add(java.util.Calendar.DAY_OF_MONTH, 1)
+        }
+        cal.timeInMillis
+    }
+    // A task shows if its due date is before tomorrow. Snoozed and paused tasks
+    // are hidden (paused household → empty list, banner explains why).
+    val visibleTasks = remember(state.tasks, state.pausedUntil) {
+        if (state.pausedUntil != null && state.pausedUntil > now) return@remember emptyList()
         state.tasks
             .filter { it.snoozedUntil == null || it.snoozedUntil <= now }
+            .filter { task ->
+                val due = (task.lastDoneAt ?: 0L) +
+                    task.frequencyDays.toLong() * 86_400_000L
+                task.lastDoneAt == null || due < startOfTomorrow
+            }
             .sortedByDescending { it.dirtiness(now) }
     }
     val areaNamesById = remember(state.areas) { state.areas.associate { it.id to it.name } }
 
     if (visibleTasks.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nothing needs doing right now 🎉", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (state.pausedUntil != null && state.pausedUntil > now)
+                    "Vacation mode — nothing's due."
+                else "Nothing due today 🎉",
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         return
     }
@@ -949,9 +968,13 @@ private fun AddAreaDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
+    // Match the room labels from the onboarding wizard so the lists never diverge.
     val suggestions = remember {
-        listOf("Kitchen", "Bathroom", "Bedroom", "Living room", "Laundry",
-            "Outdoor", "Garage", "Pets", "Kids", "Office")
+        listOf(
+            "Kitchen", "Bathroom", "Bedroom", "Living room", "Laundry",
+            "Outdoor", "Whole home", "Pets", "Kids", "Seasonal",
+            "Errands", "Vehicle", "Personal", "Financial", "Plants", "Family",
+        )
     }
     var value by remember { mutableStateOf("") }
     AlertDialog(

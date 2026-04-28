@@ -29,6 +29,9 @@ interface ChoreApi {
     @PATCH("api/household")
     suspend fun patchHousehold(@Body req: PatchHouseholdRequest)
 
+    @PATCH("api/household")
+    suspend fun renameHousehold(@Body req: RenameHouseholdRequest)
+
     @POST("api/invites")
     suspend fun createInvite(): Invite
 
@@ -40,6 +43,9 @@ interface ChoreApi {
 
     @PATCH("api/areas/{id}")
     suspend fun patchArea(@Path("id") id: String, @Body req: PatchAreaRequest)
+
+    @POST("api/areas/{id}/copy")
+    suspend fun copyArea(@Path("id") id: String, @Body req: CopyAreaRequest): Area
 
     @DELETE("api/areas/{id}")
     suspend fun deleteArea(@Path("id") id: String)

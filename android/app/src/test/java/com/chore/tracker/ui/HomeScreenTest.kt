@@ -59,7 +59,7 @@ class HomeScreenTest {
         compose.onNodeWithTag("taskRow:Mop floor").assertIsDisplayed()
 
         // Switch to Areas tab and the area card appears
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaCard:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -82,7 +82,7 @@ class HomeScreenTest {
         }
         compose.onNodeWithTag("onboardingSkip").performClick()
         // Areas tab shows "Tap +" empty state with the FAB available
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithText("Tap + to add your first area").fetchSemanticsNodes().isNotEmpty()
         }
@@ -105,7 +105,7 @@ class HomeScreenTest {
         compose.onNodeWithTag("textDialogConfirm").performClick()
 
         // Area cards live on the Areas tab
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaCard:Bathroom").fetchSemanticsNodes().isNotEmpty()
         }
@@ -193,8 +193,8 @@ class HomeScreenTest {
     @Test fun `plan areas and activity tabs are present`() {
         val repo = newRepo(FakeApi())
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
-        compose.onNodeWithTag("tab:plan").assertIsDisplayed()
-        compose.onNodeWithTag("tab:areas").assertIsDisplayed()
+        compose.onNodeWithTag("tab:today").assertIsDisplayed()
+        compose.onNodeWithTag("tab:household").assertIsDisplayed()
         compose.onNodeWithTag("tab:activity").assertIsDisplayed()
     }
 
@@ -217,15 +217,23 @@ class HomeScreenTest {
         compose.onNodeWithTag("activityScreen").assertIsDisplayed()
     }
 
-    @Test fun `workload card renders when data is present`() {
+    @Test fun `workload card renders on Activity tab when data is present`() {
         val fake = FakeApi().apply {
             areas.add(Area("a1", "Kitchen", null, 0, 0))
+            activityFeed.add(
+                ActivityEntry("c1", "t1", "Vacuum", "Living room", "Alice", System.currentTimeMillis()),
+            )
             workloadData.add(WorkloadEntry("u1", "Alice", 5))
             workloadData.add(WorkloadEntry("u2", "Bob", 2))
         }
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
+        // Workload no longer appears on the Today tab
+        compose.waitUntil(2_000) {
+            compose.onAllNodesWithTag("tab:activity").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("tab:activity").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("workloadCard").fetchSemanticsNodes().isNotEmpty()
         }
@@ -284,7 +292,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -303,7 +311,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("areaHeader:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -430,7 +438,7 @@ class HomeScreenTest {
         val repo = newRepo(fake)
         compose.setContent { HomeScreen(repo = repo, onSignOut = {}) }
 
-        compose.onNodeWithTag("tab:areas").performClick()
+        compose.onNodeWithTag("tab:household").performClick()
         compose.waitUntil(2_000) {
             compose.onAllNodesWithTag("addTaskButton:Kitchen").fetchSemanticsNodes().isNotEmpty()
         }

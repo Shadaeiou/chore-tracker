@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.chore.tracker.data.ActivityEntry
+import com.chore.tracker.data.WorkloadEntry
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,9 +37,10 @@ import java.util.Locale
 fun ActivityScreen(
     activity: List<ActivityEntry>,
     modifier: Modifier = Modifier,
+    workload: List<WorkloadEntry> = emptyList(),
     onUndo: ((ActivityEntry) -> Unit)? = null,
 ) {
-    if (activity.isEmpty()) {
+    if (activity.isEmpty() && workload.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize().testTag("activityScreen"),
             contentAlignment = Alignment.Center,
@@ -58,6 +60,13 @@ fun ActivityScreen(
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("activityScreen"),
     ) {
+        if (workload.isNotEmpty()) {
+            item(key = "workload") {
+                Spacer(Modifier.height(8.dp))
+                WorkloadCard(entries = workload)
+                Spacer(Modifier.height(16.dp))
+            }
+        }
         grouped.forEach { (date, entries) ->
             item(key = "header_$date") {
                 Spacer(Modifier.height(12.dp))

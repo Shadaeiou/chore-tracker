@@ -183,12 +183,18 @@ app.get("/api/household", async (c) => {
 
 app.patch("/api/household", async (c) => {
   const { hh } = c.get("user");
-  const body = await c.req.json<{ pausedUntil?: number | null }>();
-  if (!("pausedUntil" in body))
-    throw new HTTPException(400, { message: "nothing to update" });
-  await c.env.DB.prepare("UPDATE households SET paused_until = ? WHERE id = ?")
-    .bind(body.pausedUntil ?? null, hh)
-    .run();
+  const body = await c.req.json<{ pausedUntil?: number | null; name?: string }>();
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if ("pausedUntil" in body) { sets.push("paused_until = ?"); bindings.push(body.pausedUntil ?? null); }
+  if (body.name !== undefined) {
+    if (!body.name.trim()) throw new HTTPException(400, { message: "name cannot be blank" });
+    sets.push("name = ?"); bindings.push(body.name.trim());
+  }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+  bindings.push(hh);
+  await c.env.DB.prepare(`UPDATE households SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...bindings).run();
   return c.json({ ok: true });
 });
 
@@ -268,6 +274,44 @@ app.patch("/api/areas/:id", async (c) => {
     `UPDATE areas SET ${sets.join(", ")} WHERE id = ?`,
   ).bind(...bindings).run();
   return c.json({ ok: true });
+});
+
+app.post("/api/areas/:id/copy", async (c) => {
+  const { sub, hh } = c.get("user");
+  const sourceId = c.req.param("id");
+  const body = await c.req.json<{ name: string }>();
+  if (!body.name?.trim()) throw new HTTPException(400, { message: "name required" });
+
+  const source = await c.env.DB.prepare(
+    "SELECT id, icon, sort_order FROM areas WHERE id = ? AND household_id = ?",
+  ).bind(sourceId, hh).first<{ id: string; icon: string | null; sort_order: number }>();
+  if (!source) throw new HTTPException(404);
+
+  const { results: tasks } = await c.env.DB.prepare(
+    `SELECT name, frequency_days, auto_rotate, effort_points
+       FROM tasks WHERE area_id = ?`,
+  ).bind(sourceId).all<{
+    name: string; frequency_days: number; auto_rotate: number; effort_points: number;
+  }>();
+
+  const newAreaId = newId();
+  const now = Date.now();
+  const stmts = [
+    c.env.DB.prepare(
+      `INSERT INTO areas (id, household_id, name, icon, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(newAreaId, hh, body.name.trim(), source.icon, source.sort_order, now),
+  ];
+  for (const t of tasks) {
+    stmts.push(
+      c.env.DB.prepare(
+        `INSERT INTO tasks (id, area_id, name, frequency_days, assigned_to, auto_rotate, effort_points, last_done_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      ).bind(newId(), newAreaId, t.name, t.frequency_days, sub, t.auto_rotate, t.effort_points, now),
+    );
+  }
+  await c.env.DB.batch(stmts);
+  return c.json({ id: newAreaId, name: body.name.trim(), copiedTasks: tasks.length });
 });
 
 app.delete("/api/areas/:id", async (c) => {

@@ -903,6 +903,93 @@ describe("device tokens", () => {
   });
 });
 
+describe("PATCH /api/household (rename)", () => {
+  it("updates name", async () => {
+    const auth = await register({ householdName: "Old name" });
+    const res = await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ name: "New name" }),
+    });
+    expect(res.status).toBe(200);
+    const hh = (await (await api("/api/household", { token: auth.token })).json()) as {
+      household: { name: string };
+    };
+    expect(hh.household.name).toBe("New name");
+  });
+
+  it("rejects blank name", async () => {
+    const auth = await register();
+    const res = await api("/api/household", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ name: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/areas/:id/copy", () => {
+  async function seedAreaWithTasks(): Promise<{ token: string; areaId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Bathroom" }),
+    })).json()) as { id: string };
+    await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Scrub tub", frequencyDays: 14, effortPoints: 3 }),
+    });
+    await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop floor", frequencyDays: 7 }),
+    });
+    return { token: auth.token, areaId: area.id };
+  }
+
+  it("creates new area with copied tasks (no completions)", async () => {
+    const { token, areaId } = await seedAreaWithTasks();
+    const res = await api(`/api/areas/${areaId}/copy`, {
+      method: "POST", token,
+      body: JSON.stringify({ name: "Master Bathroom" }),
+    });
+    expect(res.status).toBe(200);
+    const result = (await res.json()) as { id: string; copiedTasks: number };
+    expect(result.copiedTasks).toBe(2);
+
+    // Verify both areas exist
+    const areas = (await (await api("/api/areas", { token })).json()) as Array<{ name: string }>;
+    expect(areas.map((a) => a.name).sort()).toEqual(["Bathroom", "Master Bathroom"]);
+
+    // Verify tasks were copied
+    const allTasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      areaId: string; name: string; lastDoneAt: number | null;
+    }>;
+    const newAreaTasks = allTasks.filter((t) => t.areaId === result.id);
+    expect(newAreaTasks).toHaveLength(2);
+    expect(newAreaTasks.map((t) => t.name).sort()).toEqual(["Mop floor", "Scrub tub"]);
+    // None of the copied tasks should have a lastDoneAt yet
+    expect(newAreaTasks.every((t) => t.lastDoneAt === null)).toBe(true);
+  });
+
+  it("rejects copy of another household's area", async () => {
+    const { areaId } = await seedAreaWithTasks();
+    const bob = await register();
+    const res = await api(`/api/areas/${areaId}/copy`, {
+      method: "POST", token: bob.token,
+      body: JSON.stringify({ name: "Hijack" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects empty name", async () => {
+    const { token, areaId } = await seedAreaWithTasks();
+    const res = await api(`/api/areas/${areaId}/copy`, {
+      method: "POST", token,
+      body: JSON.stringify({ name: "  " }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("PATCH /api/household (vacation/pause)", () => {
   it("sets and clears paused_until", async () => {
     const auth = await register();

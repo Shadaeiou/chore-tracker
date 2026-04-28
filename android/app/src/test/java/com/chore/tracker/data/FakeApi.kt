@@ -27,10 +27,14 @@ class FakeApi : ChoreApi {
     var pausedUntil: Long? = null
     override suspend fun household(): HouseholdResponse {
         maybeThrow()
-        return HouseholdResponse(Household("hh-1", "Home", 0, pausedUntil), members.toList())
+        return HouseholdResponse(Household("hh-1", householdName, 0, pausedUntil), members.toList())
     }
     override suspend fun patchHousehold(req: PatchHouseholdRequest) {
         maybeThrow(); pausedUntil = req.pausedUntil
+    }
+    var householdName: String = "Home"
+    override suspend fun renameHousehold(req: RenameHouseholdRequest) {
+        maybeThrow(); householdName = req.name
     }
     override suspend fun createInvite(): Invite { maybeThrow(); return Invite(inviteCode, expiresAt = 0) }
     override suspend fun areas(): List<Area> { maybeThrow(); refreshes += 1; return areas.toList() }
@@ -42,6 +46,24 @@ class FakeApi : ChoreApi {
     override suspend fun patchArea(id: String, req: PatchAreaRequest) {
         maybeThrow()
         areas.replaceAll { a -> if (a.id != id) a else a.copy(name = req.name ?: a.name) }
+    }
+    val copiedAreas = mutableListOf<Pair<String, String>>()
+    override suspend fun copyArea(id: String, req: CopyAreaRequest): Area {
+        maybeThrow()
+        val source = areas.firstOrNull { it.id == id } ?: throw IllegalStateException("not found")
+        val newArea = Area(id = "a-${areas.size + 1}", name = req.name, sortOrder = source.sortOrder, createdAt = 0)
+        areas.add(newArea)
+        // Copy tasks (without completions)
+        tasks.filter { it.areaId == id }.forEach { srcTask ->
+            tasks.add(srcTask.copy(
+                id = "t-${tasks.size + 1}",
+                areaId = newArea.id,
+                lastDoneAt = null,
+                lastDoneBy = null,
+            ))
+        }
+        copiedAreas.add(id to req.name)
+        return newArea
     }
     override suspend fun deleteArea(id: String) { maybeThrow(); areas.removeAll { it.id == id } }
     override suspend fun tasks(): List<Task> { maybeThrow(); return tasks.toList() }

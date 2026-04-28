@@ -118,6 +118,12 @@ data class Household(
 data class PatchHouseholdRequest(val pausedUntil: Long? = null)
 
 @Serializable
+data class RenameHouseholdRequest(val name: String)
+
+@Serializable
+data class CopyAreaRequest(val name: String)
+
+@Serializable
 data class SnoozeRequest(val until: Long)
 
 @Serializable
