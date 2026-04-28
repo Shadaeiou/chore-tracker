@@ -127,8 +127,9 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AvatarPreview(
-                        avatarDataUrl = me?.avatar,
+                    AvatarBadge(
+                        userId = me?.id,
+                        avatarVersion = me?.avatarVersion ?: 0,
                         fallbackText = me?.displayName?.take(1)?.uppercase().orEmpty().ifBlank { "?" },
                         size = 48,
                     )

@@ -7,6 +7,7 @@ import android.os.Build
 import com.chore.tracker.data.DataStoreSession
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
+import com.chore.tracker.ui.AvatarCache
 
 class ChoreApp : Application() {
     lateinit var session: Session
@@ -18,6 +19,7 @@ class ChoreApp : Application() {
         super.onCreate()
         session = DataStoreSession(applicationContext)
         repo = Repo(session)
+        AvatarCache.configure(repo.api)
         createNotificationChannels()
     }
 

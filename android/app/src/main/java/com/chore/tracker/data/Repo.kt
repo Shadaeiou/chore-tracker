@@ -78,6 +78,7 @@ class Repo(
             session.setFcmToken(null)
         }
         session.setToken(null)
+        com.chore.tracker.ui.AvatarCache.clear()
         _state.value = HouseholdState()
     }
 

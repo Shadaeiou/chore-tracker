@@ -3,9 +3,7 @@ package com.chore.tracker.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,8 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -36,9 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -164,7 +157,8 @@ fun ProfileScreen(repo: Repo, onBack: () -> Unit) {
                             // Send avatar field unconditionally so explicit removal (null) is honored.
                             repo.api.patchMe(PatchProfileRequest(displayName = displayName.trim(), avatar = avatar))
                         }
-                            .onSuccess {
+                            .onSuccess { updated ->
+                                AvatarCache.put(updated.id, updated.avatarVersion, updated.avatar)
                                 repo.refresh()
                                 onBack()
                             }
@@ -177,42 +171,4 @@ fun ProfileScreen(repo: Repo, onBack: () -> Unit) {
     }
 }
 
-@Composable
-fun AvatarPreview(
-    avatarDataUrl: String?,
-    fallbackText: String,
-    size: Int,
-) {
-    val bitmap = remember(avatarDataUrl) { decodeAvatarDataUrl(avatarDataUrl) }
-    Box(
-        modifier = Modifier
-            .size(size.dp)
-            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-            .testTag("avatarPreview"),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) {
-            androidx.compose.foundation.Image(
-                bitmap = bitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                filterQuality = FilterQuality.Medium,
-                modifier = Modifier
-                    .size(size.dp)
-                    .clip(CircleShape),
-            )
-        } else {
-            val style = when {
-                size <= 28 -> MaterialTheme.typography.labelSmall
-                size <= 48 -> MaterialTheme.typography.titleMedium
-                else -> MaterialTheme.typography.headlineSmall
-            }
-            Text(
-                fallbackText,
-                style = style,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
-    }
-}
 

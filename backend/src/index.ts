@@ -195,7 +195,7 @@ app.get("/api/household", async (c) => {
     .bind(hh)
     .first();
   const { results: members } = await c.env.DB.prepare(
-    `SELECT id, display_name AS displayName, email, avatar
+    `SELECT id, display_name AS displayName, email, avatar_version AS avatarVersion
        FROM users WHERE household_id = ? ORDER BY created_at`,
   )
     .bind(hh)
@@ -220,7 +220,8 @@ function validateAvatar(avatar: string | null): void {
 app.get("/api/me", async (c) => {
   const { sub } = c.get("user");
   const me = await c.env.DB.prepare(
-    "SELECT id, email, display_name AS displayName, avatar FROM users WHERE id = ?",
+    `SELECT id, email, display_name AS displayName, avatar,
+            avatar_version AS avatarVersion FROM users WHERE id = ?`,
   ).bind(sub).first();
   if (!me) throw new HTTPException(404);
   return c.json(me);
@@ -242,15 +243,28 @@ app.patch("/api/me", async (c) => {
     validateAvatar(body.avatar ?? null);
     sets.push("avatar = ?");
     bindings.push(body.avatar ?? null);
+    sets.push("avatar_version = avatar_version + 1");
   }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
   bindings.push(sub);
   await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();
   await fanOutRefresh(c, hh, sub);
   const me = await c.env.DB.prepare(
-    "SELECT id, email, display_name AS displayName, avatar FROM users WHERE id = ?",
+    `SELECT id, email, display_name AS displayName, avatar,
+            avatar_version AS avatarVersion FROM users WHERE id = ?`,
   ).bind(sub).first();
   return c.json(me);
+});
+
+app.get("/api/users/:id/avatar", async (c) => {
+  const { hh } = c.get("user");
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(
+    `SELECT avatar, avatar_version AS avatarVersion FROM users
+       WHERE id = ? AND household_id = ?`,
+  ).bind(id, hh).first<{ avatar: string | null; avatarVersion: number }>();
+  if (!row) throw new HTTPException(404);
+  return c.json(row);
 });
 
 app.patch("/api/household", async (c) => {
@@ -804,7 +818,8 @@ app.get("/api/activity", async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT c.id, c.task_id AS taskId, t.name AS taskName,
-            a.name AS areaName, u.display_name AS doneBy, u.avatar AS doneByAvatar,
+            a.name AS areaName, u.id AS doneById, u.display_name AS doneBy,
+            u.avatar_version AS doneByAvatarVersion,
             c.done_at AS doneAt, c.notes AS notes
        FROM completions c
        JOIN tasks t ON t.id = c.task_id

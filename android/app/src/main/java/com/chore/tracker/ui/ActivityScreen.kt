@@ -188,8 +188,9 @@ private fun ActivityRow(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 // Initial badge for the doer (or the doer's uploaded avatar).
-                AvatarPreview(
-                    avatarDataUrl = entry.doneByAvatar,
+                AvatarBadge(
+                    userId = entry.doneById,
+                    avatarVersion = entry.doneByAvatarVersion,
                     fallbackText = entry.doneBy.take(1).uppercase(),
                     size = 24,
                 )

@@ -29,6 +29,9 @@ interface ChoreApi {
     @PATCH("api/me")
     suspend fun patchMe(@Body req: PatchProfileRequest): UserProfile
 
+    @GET("api/users/{id}/avatar")
+    suspend fun userAvatar(@Path("id") id: String): UserAvatarResponse
+
     @GET("api/household")
     suspend fun household(): HouseholdResponse
 

@@ -1011,10 +1011,13 @@ describe("/api/me (self profile)", () => {
     const auth = await register({ displayName: "Burke" });
     const res = await api("/api/me", { token: auth.token });
     expect(res.status).toBe(200);
-    const me = (await res.json()) as { id: string; email: string; displayName: string; avatar: string | null };
+    const me = (await res.json()) as {
+      id: string; email: string; displayName: string; avatar: string | null; avatarVersion: number;
+    };
     expect(me.id).toBe(auth.userId);
     expect(me.displayName).toBe("Burke");
     expect(me.avatar).toBeNull();
+    expect(me.avatarVersion).toBe(0);
   });
 
   it("updates displayName", async () => {
@@ -1037,7 +1040,7 @@ describe("/api/me (self profile)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("stores and clears avatar data URL", async () => {
+  it("stores and clears avatar data URL and bumps avatarVersion", async () => {
     const auth = await register();
     // 1x1 transparent png as a data URL
     const png =
@@ -1047,13 +1050,27 @@ describe("/api/me (self profile)", () => {
       body: JSON.stringify({ avatar: png }),
     });
     expect(set.status).toBe(200);
-    expect(((await set.json()) as { avatar: string }).avatar).toBe(png);
+    const afterSet = (await set.json()) as { avatar: string; avatarVersion: number };
+    expect(afterSet.avatar).toBe(png);
+    expect(afterSet.avatarVersion).toBe(1);
     const cleared = await api("/api/me", {
       method: "PATCH", token: auth.token,
       body: JSON.stringify({ avatar: null }),
     });
     expect(cleared.status).toBe(200);
-    expect(((await cleared.json()) as { avatar: string | null }).avatar).toBeNull();
+    const afterClear = (await cleared.json()) as { avatar: string | null; avatarVersion: number };
+    expect(afterClear.avatar).toBeNull();
+    expect(afterClear.avatarVersion).toBe(2);
+  });
+
+  it("does not bump avatarVersion when only renaming", async () => {
+    const auth = await register();
+    const res = await api("/api/me", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ displayName: "Renamed" }),
+    });
+    const me = (await res.json()) as { avatarVersion: number };
+    expect(me.avatarVersion).toBe(0);
   });
 
   it("rejects non-data-URL avatars", async () => {
@@ -1074,7 +1091,7 @@ describe("/api/me (self profile)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("includes avatar on household members listing", async () => {
+  it("members listing returns avatarVersion (no inline avatar payload)", async () => {
     const auth = await register({ displayName: "Burke" });
     const png =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -1083,9 +1100,33 @@ describe("/api/me (self profile)", () => {
       body: JSON.stringify({ avatar: png }),
     });
     const hh = (await (await api("/api/household", { token: auth.token })).json()) as {
-      members: Array<{ id: string; avatar: string | null }>;
+      members: Array<{ id: string; avatarVersion: number; avatar?: string }>;
     };
-    expect(hh.members.find((m) => m.id === auth.userId)?.avatar).toBe(png);
+    const me = hh.members.find((m) => m.id === auth.userId)!;
+    expect(me.avatarVersion).toBe(1);
+    expect(me.avatar).toBeUndefined();
+  });
+
+  it("GET /api/users/:id/avatar returns the avatar payload", async () => {
+    const auth = await register();
+    const png =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    await api("/api/me", {
+      method: "PATCH", token: auth.token,
+      body: JSON.stringify({ avatar: png }),
+    });
+    const res = await api(`/api/users/${auth.userId}/avatar`, { token: auth.token });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { avatar: string | null; avatarVersion: number };
+    expect(body.avatar).toBe(png);
+    expect(body.avatarVersion).toBe(1);
+  });
+
+  it("GET /api/users/:id/avatar 404s for users in other households", async () => {
+    const a = await register();
+    const b = await register();
+    const res = await api(`/api/users/${b.userId}/avatar`, { token: a.token });
+    expect(res.status).toBe(404);
   });
 });
 
