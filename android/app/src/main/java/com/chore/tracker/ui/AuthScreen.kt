@@ -1,5 +1,8 @@
 package com.chore.tracker.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,7 +11,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,8 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.chore.tracker.R
 import com.chore.tracker.data.Repo
 import kotlinx.coroutines.launch
 
@@ -38,19 +51,33 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
     var inviteCode by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var passwordVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp).testTag("authScreen"),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("authScreen"),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Image(
+            painter = painterResource(R.drawable.ic_sock),
+            contentDescription = "Dobby",
+            modifier = Modifier.size(96.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("Dobby", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(4.dp))
         Text(
             when (mode) {
                 Mode.Login -> "Sign in"
                 Mode.NewHousehold -> "Create account"
                 Mode.JoinHousehold -> "Join household"
             },
+            style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
@@ -64,7 +91,20 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
             password,
             { password = it },
             label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (passwordVisible) VisualTransformation.None
+            else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(
+                    onClick = { passwordVisible = !passwordVisible },
+                    modifier = Modifier.testTag("passwordVisibilityToggle"),
+                ) {
+                    Icon(
+                        if (passwordVisible) Icons.Default.VisibilityOff
+                        else Icons.Default.Visibility,
+                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                    )
+                }
+            },
             modifier = Modifier.fillMaxWidth().testTag("passwordField"),
         )
 

@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Sock body: an L-shape (leg drops to the ankle, foot extends right). -->
+    <path
+        android:fillColor="#FAFAFA"
+        android:pathData="M30,20 H66 V56 H86 V86 H30 Z"/>
+    <!-- Three colored cuff stripes echo the green/yellow/red status palette. -->
+    <path
+        android:fillColor="#D32F2F"
+        android:pathData="M30,20 H66 V28 H30 Z"/>
+    <path
+        android:fillColor="#FBC02D"
+        android:pathData="M30,32 H66 V40 H30 Z"/>
+    <path
+        android:fillColor="#388E3C"
+        android:pathData="M30,44 H66 V52 H30 Z"/>
+    <!-- Toe accent. -->
+    <path
+        android:fillColor="#90CAF9"
+        android:pathData="M76,68 H86 V86 H76 Z"/>
+</vector>

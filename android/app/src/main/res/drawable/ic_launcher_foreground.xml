@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Same sock as ic_sock but ever-so-slightly inset for the adaptive
+         icon's safe zone. -->
+    <path
+        android:fillColor="#FAFAFA"
+        android:pathData="M32,22 H66 V56 H84 V84 H32 Z"/>
+    <path
+        android:fillColor="#D32F2F"
+        android:pathData="M32,22 H66 V30 H32 Z"/>
+    <path
+        android:fillColor="#FBC02D"
+        android:pathData="M32,34 H66 V40 H32 Z"/>
+    <path
+        android:fillColor="#388E3C"
+        android:pathData="M32,44 H66 V50 H32 Z"/>
+    <path
+        android:fillColor="#90CAF9"
+        android:pathData="M76,68 H84 V84 H76 Z"/>
+</vector>
