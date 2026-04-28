@@ -1,5 +1,6 @@
 package com.chore.tracker.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -92,6 +93,10 @@ class Repo(
                 isLoading = false,
                 error = null,
             )
+        } catch (e: CancellationException) {
+            // Coroutine cancellation (e.g. app backgrounded, scope cancelled) is not a real error.
+            _state.value = _state.value.copy(isLoading = false)
+            throw e
         } catch (t: Throwable) {
             _state.value = _state.value.copy(isLoading = false, error = t.message ?: "load failed")
         }

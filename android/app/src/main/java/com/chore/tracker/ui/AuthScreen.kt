@@ -57,7 +57,7 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
             email,
             { email = it },
             label = { Text("Email") },
-            modifier = Modifier.testTag("emailField"),
+            modifier = Modifier.fillMaxWidth().testTag("emailField"),
         )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
@@ -65,7 +65,7 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
             { password = it },
             label = { Text("Password") },
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.testTag("passwordField"),
+            modifier = Modifier.fillMaxWidth().testTag("passwordField"),
         )
 
         if (mode != Mode.Login) {
@@ -74,7 +74,7 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
                 displayName,
                 { displayName = it },
                 label = { Text("Your name") },
-                modifier = Modifier.testTag("displayNameField"),
+                modifier = Modifier.fillMaxWidth().testTag("displayNameField"),
             )
         }
         if (mode == Mode.NewHousehold) {
@@ -83,7 +83,7 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
                 householdName,
                 { householdName = it },
                 label = { Text("Household name") },
-                modifier = Modifier.testTag("householdNameField"),
+                modifier = Modifier.fillMaxWidth().testTag("householdNameField"),
             )
         }
         if (mode == Mode.JoinHousehold) {
@@ -92,7 +92,7 @@ fun AuthScreen(repo: Repo, onSignedIn: () -> Unit) {
                 inviteCode,
                 { inviteCode = it },
                 label = { Text("Invite code") },
-                modifier = Modifier.testTag("inviteCodeField"),
+                modifier = Modifier.fillMaxWidth().testTag("inviteCodeField"),
             )
         }
 

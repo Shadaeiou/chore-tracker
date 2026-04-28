@@ -184,10 +184,16 @@ fun HomeScreen(
                             }
                         },
                     ) {
-                        val tint = if (state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis())
-                            MaterialTheme.colorScheme.primary
-                        else androidx.compose.ui.graphics.Color.Unspecified
-                        Icon(Icons.Default.BeachAccess, contentDescription = "Vacation mode", tint = tint)
+                        val isPaused = state.pausedUntil != null && state.pausedUntil!! > System.currentTimeMillis()
+                        if (isPaused) {
+                            Icon(
+                                Icons.Default.BeachAccess,
+                                contentDescription = "Vacation mode (active)",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Icon(Icons.Default.BeachAccess, contentDescription = "Vacation mode")
+                        }
                     }
                     IconButton(
                         modifier = Modifier.testTag("settingsButton"),
@@ -1108,9 +1114,21 @@ private fun TemplateLibraryPicker(
             .onSuccess { templates = it }
             .onFailure { error = it.message }
     }
+    // If the area's name maps to a known template category (exact match or contains match),
+    // show only those templates. Otherwise show everything so the user can still browse.
     val ordered = remember(templates, preferredArea) {
-        if (preferredArea == null) templates
-        else templates.sortedBy { if (it.suggestedArea == preferredArea) 0 else 1 }
+        if (preferredArea == null) return@remember templates
+        val areaLabelToKey = mapOf(
+            "living room" to "living",
+            "whole home" to "general",
+        )
+        val normalized = areaLabelToKey[preferredArea] ?: preferredArea
+        val matched = templates.filter { tmpl ->
+            tmpl.suggestedArea == normalized
+                || tmpl.suggestedArea in normalized
+                || normalized in tmpl.suggestedArea
+        }
+        if (matched.isNotEmpty()) matched else templates
     }
     AlertDialog(
         modifier = Modifier.testTag("libraryPicker"),
