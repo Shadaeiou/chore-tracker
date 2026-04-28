@@ -17,6 +17,7 @@ import com.chore.tracker.ui.ChoreTheme
 import com.chore.tracker.ui.HomeScreen
 import com.chore.tracker.ui.SettingsScreen
 import com.chore.tracker.ui.ThemeMode
+import com.chore.tracker.ui.ThemePalette
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,7 +25,8 @@ class MainActivity : ComponentActivity() {
         val app = application as ChoreApp
         setContent {
             val themeMode by app.session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
-            ChoreTheme(themeMode = themeMode) {
+            val themePalette by app.session.themePaletteFlow.collectAsState(initial = ThemePalette.GREEN)
+            ChoreTheme(themeMode = themeMode, themePalette = themePalette) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Root(app)
                 }

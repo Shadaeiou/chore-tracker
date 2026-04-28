@@ -1209,11 +1209,17 @@ private fun TaskRow(
 
     val isOverdue = task.lastDoneAt == null || due < startOfToday
     val isDueToday = !isOverdue && due < startOfTomorrow
-    val statusColor = when {
+    val defaultColor = when {
         isOverdue -> Color(0xFFD32F2F)
         isDueToday -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
+    val customHex = when {
+        isOverdue -> indicators.overdueColor
+        isDueToday -> indicators.dueTodayColor
+        else -> indicators.notDueColor
+    }
+    val statusColor = customHex.parseHexOrNull() ?: defaultColor
     val statusOverride = when {
         isOverdue -> indicators.overdue
         isDueToday -> indicators.dueToday

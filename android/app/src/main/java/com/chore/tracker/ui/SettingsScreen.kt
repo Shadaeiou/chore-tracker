@@ -1,6 +1,7 @@
 package com.chore.tracker.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,11 +14,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,11 +36,15 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,6 +59,13 @@ import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.StatusKey
 import kotlinx.coroutines.launch
 
+private val INDICATOR_PRESETS = listOf(
+    Color(0xFFD32F2F), Color(0xFFE65100), Color(0xFFF57C00), Color(0xFFFBC02D),
+    Color(0xFF7CB342), Color(0xFF388E3C), Color(0xFF00897B), Color(0xFF0288D1),
+    Color(0xFF1976D2), Color(0xFF512DA8), Color(0xFF8E24AA), Color(0xFFC2185B),
+    Color(0xFF6D4C41), Color(0xFF455A64), Color(0xFF212121), Color(0xFF9E9E9E),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -59,9 +76,12 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val themeMode by session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
+    val palette by session.themePaletteFlow.collectAsState(initial = ThemePalette.GREEN)
     val indicators by session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
     val houseState = repo?.state?.collectAsState()
     val isPaused = houseState?.value?.pausedUntil?.let { it > System.currentTimeMillis() } == true
+
+    var pickingColorFor by remember { mutableStateOf<StatusKey?>(null) }
 
     Scaffold(
         topBar = {
@@ -94,6 +114,23 @@ fun SettingsScreen(
                     onSelect = { scope.launch { session.setThemeMode(mode) } },
                     testTag = "themeOption:${mode.name}",
                 )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text("Color palette", style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ThemePalette.entries.forEach { p ->
+                    PaletteSwatch(
+                        palette = p,
+                        selected = palette == p,
+                        onClick = { scope.launch { session.setThemePalette(p) } },
+                    )
+                }
             }
 
             // Vacation mode (formerly the umbrella icon in the toolbar).
@@ -131,38 +168,41 @@ fun SettingsScreen(
                 }
             }
 
-            // Status indicators — colorblind-friendly / "be funny" customization.
+            // Status indicators.
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
             Text("Status indicators", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Leave blank for the default colored dot, or enter an emoji or " +
-                    "short text to use instead.",
+                "Tap a dot to recolor it. Type an emoji or short text on the " +
+                    "right to use that instead.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 4.dp),
             )
             IndicatorRow(
+                key = StatusKey.OVERDUE,
                 label = "Overdue",
                 defaultColor = Color(0xFFD32F2F),
-                value = indicators.overdue,
-                onChange = { scope.launch { session.setStatusIndicator(StatusKey.OVERDUE, it) } },
-                testTag = "indicatorField:OVERDUE",
+                indicators = indicators,
+                onTextChange = { scope.launch { session.setStatusIndicator(StatusKey.OVERDUE, it) } },
+                onPickColor = { pickingColorFor = StatusKey.OVERDUE },
             )
             IndicatorRow(
+                key = StatusKey.DUE_TODAY,
                 label = "Due today",
                 defaultColor = Color(0xFFFBC02D),
-                value = indicators.dueToday,
-                onChange = { scope.launch { session.setStatusIndicator(StatusKey.DUE_TODAY, it) } },
-                testTag = "indicatorField:DUE_TODAY",
+                indicators = indicators,
+                onTextChange = { scope.launch { session.setStatusIndicator(StatusKey.DUE_TODAY, it) } },
+                onPickColor = { pickingColorFor = StatusKey.DUE_TODAY },
             )
             IndicatorRow(
+                key = StatusKey.NOT_DUE,
                 label = "Not due",
                 defaultColor = Color(0xFF388E3C),
-                value = indicators.notDue,
-                onChange = { scope.launch { session.setStatusIndicator(StatusKey.NOT_DUE, it) } },
-                testTag = "indicatorField:NOT_DUE",
+                indicators = indicators,
+                onTextChange = { scope.launch { session.setStatusIndicator(StatusKey.NOT_DUE, it) } },
+                onPickColor = { pickingColorFor = StatusKey.NOT_DUE },
             )
 
             Spacer(Modifier.height(24.dp))
@@ -196,16 +236,77 @@ fun SettingsScreen(
             )
         }
     }
+
+    pickingColorFor?.let { key ->
+        ColorPickerDialog(
+            currentHex = when (key) {
+                StatusKey.OVERDUE -> indicators.overdueColor
+                StatusKey.DUE_TODAY -> indicators.dueTodayColor
+                StatusKey.NOT_DUE -> indicators.notDueColor
+            },
+            onDismiss = { pickingColorFor = null },
+            onPick = { hex ->
+                scope.launch { session.setStatusColor(key, hex) }
+                pickingColorFor = null
+            },
+            onReset = {
+                scope.launch { session.setStatusColor(key, "") }
+                pickingColorFor = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun PaletteSwatch(
+    palette: ThemePalette,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(4.dp)
+            .testTag("paletteOption:${palette.name}"),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(palette.swatch, CircleShape)
+                .border(
+                    width = if (selected) 3.dp else 1.dp,
+                    color = borderColor,
+                    shape = CircleShape,
+                ),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(palette.displayName, style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 @Composable
 private fun IndicatorRow(
+    key: StatusKey,
     label: String,
     defaultColor: Color,
-    value: String,
-    onChange: (String) -> Unit,
-    testTag: String,
+    indicators: StatusIndicators,
+    onTextChange: (String) -> Unit,
+    onPickColor: () -> Unit,
 ) {
+    val text = when (key) {
+        StatusKey.OVERDUE -> indicators.overdue
+        StatusKey.DUE_TODAY -> indicators.dueToday
+        StatusKey.NOT_DUE -> indicators.notDue
+    }
+    val customColorHex = when (key) {
+        StatusKey.OVERDUE -> indicators.overdueColor
+        StatusKey.DUE_TODAY -> indicators.dueTodayColor
+        StatusKey.NOT_DUE -> indicators.notDueColor
+    }
+    val effectiveColor = customColorHex.parseHexOrNull() ?: defaultColor
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -213,25 +314,74 @@ private fun IndicatorRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Preview: emoji/text if user has overridden, otherwise the colored dot.
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
-            if (value.isBlank()) {
-                Box(modifier = Modifier.size(14.dp).background(defaultColor, CircleShape))
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clickable(onClick = onPickColor)
+                .testTag("indicatorDot:${key.name}"),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (text.isNotBlank()) {
+                Text(text)
             } else {
-                Text(value)
+                Box(modifier = Modifier.size(16.dp).background(effectiveColor, CircleShape))
             }
         }
         Text(label, modifier = Modifier.weight(1f))
         OutlinedTextField(
-            value = value,
-            onValueChange = { onChange(it.take(4)) },
+            value = text,
+            onValueChange = { onTextChange(it.take(4)) },
             singleLine = true,
             placeholder = { Text("dot") },
             modifier = Modifier
                 .width(96.dp)
-                .testTag(testTag),
+                .testTag("indicatorField:${key.name}"),
         )
     }
+}
+
+@Composable
+private fun ColorPickerDialog(
+    currentHex: String,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+    onReset: () -> Unit,
+) {
+    AlertDialog(
+        modifier = Modifier.testTag("colorPickerDialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("Pick a color") },
+        text = {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.height(220.dp),
+            ) {
+                items(INDICATOR_PRESETS) { color ->
+                    val hex = color.toHex()
+                    val isCurrent = hex.equals(currentHex, ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(color, CircleShape)
+                            .border(
+                                width = if (isCurrent) 3.dp else 1.dp,
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                shape = CircleShape,
+                            )
+                            .clickable { onPick(hex) }
+                            .testTag("colorOption:$hex"),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onReset) { Text("Use default") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -258,4 +408,18 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.SYSTEM -> "Match system"
     ThemeMode.LIGHT -> "Light"
     ThemeMode.DARK -> "Dark"
+}
+
+private fun Color.toHex(): String = String.format(
+    "#%02X%02X%02X",
+    (red * 255).toInt(),
+    (green * 255).toInt(),
+    (blue * 255).toInt(),
+)
+
+internal fun String.parseHexOrNull(): Color? {
+    if (isBlank()) return null
+    val s = trim().removePrefix("#")
+    if (s.length != 6) return null
+    return runCatching { Color(android.graphics.Color.parseColor("#$s")) }.getOrNull()
 }
