@@ -149,6 +149,7 @@ data class Member(
     val displayName: String,
     val email: String,
     val avatarVersion: Int = 0,
+    val role: String = "member",
 )
 
 @Serializable
@@ -158,6 +159,7 @@ data class UserProfile(
     val displayName: String,
     val avatar: String? = null,
     val avatarVersion: Int = 0,
+    val role: String = "member",
 )
 
 @Serializable

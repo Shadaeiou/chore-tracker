@@ -1236,6 +1236,91 @@ describe("/api/todos (à la carte reminders)", () => {
   });
 });
 
+describe("DELETE /api/users/:id (remove from household)", () => {
+  it("admin can kick another member", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const res = await api(`/api/users/${bob.userId}`, {
+      method: "DELETE", token: alice.token,
+    });
+    expect(res.status).toBe(200);
+    const hh = (await (await api("/api/household", { token: alice.token })).json()) as {
+      members: Array<{ id: string }>;
+    };
+    expect(hh.members.map((m) => m.id)).not.toContain(bob.userId);
+  });
+
+  it("non-admin cannot kick anyone", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const res = await api(`/api/users/${alice.userId}`, {
+      method: "DELETE", token: bob.token,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("admin cannot remove themselves", async () => {
+    const alice = await register();
+    const res = await api(`/api/users/${alice.userId}`, {
+      method: "DELETE", token: alice.token,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("admin gets 404 trying to kick a user from another household", async () => {
+    const alice = await register();
+    const charlie = await register();
+    const res = await api(`/api/users/${charlie.userId}`, {
+      method: "DELETE", token: alice.token,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("kick unassigns the kicked user's tasks but keeps the tasks", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token, body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 7, assignedTo: bob.userId }),
+    })).json()) as { id: string };
+    await api(`/api/users/${bob.userId}`, { method: "DELETE", token: alice.token });
+    const tasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<{
+      id: string; assignedTo: string | null;
+    }>;
+    expect(tasks.find((t) => t.id === task.id)?.assignedTo).toBeNull();
+  });
+
+  it("members listing includes role", async () => {
+    const alice = await register();
+    const hh = (await (await api("/api/household", { token: alice.token })).json()) as {
+      members: Array<{ id: string; role: string }>;
+    };
+    expect(hh.members.find((m) => m.id === alice.userId)?.role).toBe("admin");
+  });
+
+  it("invite-joined member is a regular member, not admin", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const me = (await (await api("/api/me", { token: bob.token })).json()) as { role: string };
+    expect(me.role).toBe("member");
+  });
+});
+
 describe("PATCH /api/household (rename)", () => {
   it("updates name", async () => {
     const auth = await register({ householdName: "Old name" });

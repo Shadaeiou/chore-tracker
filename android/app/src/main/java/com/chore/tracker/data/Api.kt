@@ -47,6 +47,9 @@ interface ChoreApi {
     @DELETE("api/todos/{id}")
     suspend fun deleteTodo(@Path("id") id: String)
 
+    @DELETE("api/users/{id}")
+    suspend fun removeMember(@Path("id") id: String)
+
     @GET("api/household")
     suspend fun household(): HouseholdResponse
 

@@ -178,4 +178,10 @@ class FakeApi : ChoreApi {
         todoList.replaceAll { if (it.id == id) it.copy(text = req.text, isPublic = req.isPublic) else it }
     }
     override suspend fun deleteTodo(id: String) { maybeThrow(); todoList.removeAll { it.id == id } }
+    val removedMembers = mutableListOf<String>()
+    override suspend fun removeMember(id: String) {
+        maybeThrow()
+        removedMembers.add(id)
+        members.removeAll { it.id == id }
+    }
 }

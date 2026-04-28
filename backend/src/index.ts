@@ -93,10 +93,11 @@ app.post("/auth/register", async (c) => {
       throw new HTTPException(400, { message: "invite expired" });
     householdId = invite.household_id;
 
+    // Invite-based registration → joins as a regular member.
     await c.env.DB.batch([
       c.env.DB.prepare(
-        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'member', ?)`,
       ).bind(
         userId,
         body.email.toLowerCase(),
@@ -111,7 +112,7 @@ app.post("/auth/register", async (c) => {
       ).bind(now, userId, body.inviteCode),
     ]);
   } else {
-    // Creating a brand-new household.
+    // Creating a brand-new household → registering user is admin.
     if (!body.householdName)
       throw new HTTPException(400, { message: "householdName required" });
     householdId = newId();
@@ -120,8 +121,8 @@ app.post("/auth/register", async (c) => {
         "INSERT INTO households (id, name, created_at) VALUES (?, ?, ?)",
       ).bind(householdId, body.householdName, now),
       c.env.DB.prepare(
-        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, email, display_name, password_hash, password_salt, household_id, role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'admin', ?)`,
       ).bind(
         userId,
         body.email.toLowerCase(),
@@ -195,7 +196,8 @@ app.get("/api/household", async (c) => {
     .bind(hh)
     .first();
   const { results: members } = await c.env.DB.prepare(
-    `SELECT id, display_name AS displayName, email, avatar_version AS avatarVersion
+    `SELECT id, display_name AS displayName, email,
+            avatar_version AS avatarVersion, role
        FROM users WHERE household_id = ? ORDER BY created_at`,
   )
     .bind(hh)
@@ -221,7 +223,7 @@ app.get("/api/me", async (c) => {
   const { sub } = c.get("user");
   const me = await c.env.DB.prepare(
     `SELECT id, email, display_name AS displayName, avatar,
-            avatar_version AS avatarVersion FROM users WHERE id = ?`,
+            avatar_version AS avatarVersion, role FROM users WHERE id = ?`,
   ).bind(sub).first();
   if (!me) throw new HTTPException(404);
   return c.json(me);
@@ -251,9 +253,42 @@ app.patch("/api/me", async (c) => {
   await fanOutRefresh(c, hh, sub);
   const me = await c.env.DB.prepare(
     `SELECT id, email, display_name AS displayName, avatar,
-            avatar_version AS avatarVersion FROM users WHERE id = ?`,
+            avatar_version AS avatarVersion, role FROM users WHERE id = ?`,
   ).bind(sub).first();
   return c.json(me);
+});
+
+// Admins can remove anyone but themselves from their household. The kicked
+// user's row is hard-deleted; their assigned tasks fall back to unassigned
+// and their completions cascade away. (We don't try to preserve activity
+// history for removed users yet — keep it simple.)
+app.delete("/api/users/:id", async (c) => {
+  const { sub, hh } = c.get("user");
+  const targetId = c.req.param("id");
+  if (targetId === sub) {
+    throw new HTTPException(400, { message: "cannot remove yourself" });
+  }
+  const me = await c.env.DB.prepare(
+    "SELECT role FROM users WHERE id = ? AND household_id = ?",
+  ).bind(sub, hh).first<{ role: string }>();
+  if (me?.role !== "admin") throw new HTTPException(403, { message: "admin only" });
+  const target = await c.env.DB.prepare(
+    "SELECT id FROM users WHERE id = ? AND household_id = ?",
+  ).bind(targetId, hh).first();
+  if (!target) throw new HTTPException(404);
+  await c.env.DB.batch([
+    // Unassign tasks the kicked user owned and break references that the
+    // foreign keys won't cascade for us (completions.user_id and invites.*
+    // have no ON DELETE clause). device_tokens cascades automatically.
+    c.env.DB.prepare(
+      "UPDATE tasks SET assigned_to = NULL WHERE assigned_to = ?",
+    ).bind(targetId),
+    c.env.DB.prepare("DELETE FROM completions WHERE user_id = ?").bind(targetId),
+    c.env.DB.prepare("DELETE FROM invites WHERE created_by = ? OR used_by = ?").bind(targetId, targetId),
+    c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(targetId),
+  ]);
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
 });
 
 app.get("/api/users/:id/avatar", async (c) => {

@@ -78,6 +78,7 @@ fun SettingsScreen(
     repo: Repo? = null,
     onSignOut: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
+    onOpenMembers: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -145,6 +146,26 @@ fun SettingsScreen(
                         )
                     }
                     Text("Edit", color = MaterialTheme.colorScheme.primary)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenMembers)
+                        .padding(vertical = 12.dp)
+                        .testTag("membersSettingsRow"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Household members", style = MaterialTheme.typography.bodyLarge)
+                        val count = members.size
+                        Text(
+                            "$count ${if (count == 1) "member" else "members"} — manage who's in this household",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("Manage", color = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
