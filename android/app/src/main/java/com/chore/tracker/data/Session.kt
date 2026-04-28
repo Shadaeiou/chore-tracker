@@ -32,6 +32,8 @@ interface Session {
     val themePaletteFlow: Flow<ThemePalette>
     val statusIndicatorsFlow: Flow<StatusIndicators>
     val autoUpdateFlow: Flow<Boolean>
+    /** Set of area ids currently collapsed on the household tab. Default empty (= all expanded). */
+    val collapsedAreaIdsFlow: Flow<Set<String>>
     suspend fun token(): String?
     suspend fun setToken(value: String?)
     suspend fun setThemeMode(mode: ThemeMode)
@@ -39,6 +41,7 @@ interface Session {
     suspend fun setStatusIndicator(key: StatusKey, value: String)
     suspend fun setStatusColor(key: StatusKey, hex: String)
     suspend fun setAutoUpdate(enabled: Boolean)
+    suspend fun setAreaCollapsed(areaId: String, collapsed: Boolean)
     suspend fun fcmToken(): String?
     suspend fun setFcmToken(value: String?)
 }
@@ -57,6 +60,7 @@ class DataStoreSession(private val context: Context) : Session {
     private val statusDueTodayColorKey = stringPreferencesKey("status_due_today_color")
     private val statusNotDueColorKey = stringPreferencesKey("status_not_due_color")
     private val autoUpdateKey = stringPreferencesKey("auto_update_enabled")
+    private val collapsedAreasKey = stringPreferencesKey("collapsed_area_ids")
 
     override val tokenFlow: Flow<String?> =
         context.dataStore.data.map { it[tokenKey] }
@@ -78,6 +82,14 @@ class DataStoreSession(private val context: Context) : Session {
 
     override val autoUpdateFlow: Flow<Boolean> =
         context.dataStore.data.map { it[autoUpdateKey] == "true" }
+
+    override val collapsedAreaIdsFlow: Flow<Set<String>> =
+        context.dataStore.data.map { prefs ->
+            prefs[collapsedAreasKey].orEmpty()
+                .split(',')
+                .filter { it.isNotBlank() }
+                .toSet()
+        }
 
     override val statusIndicatorsFlow: Flow<StatusIndicators> =
         context.dataStore.data.map { prefs ->
@@ -133,6 +145,18 @@ class DataStoreSession(private val context: Context) : Session {
         context.dataStore.edit { prefs -> prefs[autoUpdateKey] = enabled.toString() }
     }
 
+    override suspend fun setAreaCollapsed(areaId: String, collapsed: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[collapsedAreasKey].orEmpty()
+                .split(',')
+                .filter { it.isNotBlank() }
+                .toMutableSet()
+            if (collapsed) current.add(areaId) else current.remove(areaId)
+            if (current.isEmpty()) prefs.remove(collapsedAreasKey)
+            else prefs[collapsedAreasKey] = current.joinToString(",")
+        }
+    }
+
     override suspend fun fcmToken(): String? =
         context.dataStore.data.map { it[fcmKey] }.first()
 
@@ -153,11 +177,13 @@ class InMemorySession(
     private val paletteState = MutableStateFlow(ThemePalette.GREEN)
     private val indicatorsState = MutableStateFlow(StatusIndicators())
     private val autoUpdateState = MutableStateFlow(false)
+    private val collapsedAreasState = MutableStateFlow(emptySet<String>())
     override val tokenFlow: Flow<String?> = tokenState
     override val themeModeFlow: Flow<ThemeMode> = themeState
     override val themePaletteFlow: Flow<ThemePalette> = paletteState
     override val statusIndicatorsFlow: Flow<StatusIndicators> = indicatorsState
     override val autoUpdateFlow: Flow<Boolean> = autoUpdateState
+    override val collapsedAreaIdsFlow: Flow<Set<String>> = collapsedAreasState
     override suspend fun token(): String? = tokenState.value
     override suspend fun setToken(value: String?) { tokenState.value = value }
     override suspend fun setThemeMode(mode: ThemeMode) { themeState.value = mode }
@@ -177,6 +203,10 @@ class InMemorySession(
         }
     }
     override suspend fun setAutoUpdate(enabled: Boolean) { autoUpdateState.value = enabled }
+    override suspend fun setAreaCollapsed(areaId: String, collapsed: Boolean) {
+        collapsedAreasState.value = if (collapsed) collapsedAreasState.value + areaId
+        else collapsedAreasState.value - areaId
+    }
     private var _fcmToken: String? = null
     override suspend fun fcmToken() = _fcmToken
     override suspend fun setFcmToken(value: String?) { _fcmToken = value }

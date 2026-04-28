@@ -74,7 +74,7 @@ data class TaskTemplate(
 )
 
 @Serializable
-data class PatchAreaRequest(val name: String? = null, val icon: String? = null)
+data class PatchAreaRequest(val name: String? = null, val icon: String? = null, val sortOrder: Int? = null)
 
 @Serializable
 data class PatchTaskRequest(

@@ -510,6 +510,29 @@ describe("PATCH /api/areas/:id", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("persists sortOrder and lists areas in that order", async () => {
+    const auth = await register();
+    const a = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const b = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Bathroom" }),
+    })).json()) as { id: string };
+    const c = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Living Room" }),
+    })).json()) as { id: string };
+    // Reorder: Bathroom, Living Room, Kitchen
+    await api(`/api/areas/${b.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 0 }) });
+    await api(`/api/areas/${c.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 1 }) });
+    await api(`/api/areas/${a.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 2 }) });
+    const areas = (await (await api("/api/areas", { token: auth.token })).json()) as Array<{ id: string; name: string; sortOrder: number }>;
+    expect(areas.map((x) => x.name)).toEqual(["Bathroom", "Living Room", "Kitchen"]);
+    expect(areas.map((x) => x.sortOrder)).toEqual([0, 1, 2]);
+  });
 });
 
 describe("DELETE /api/completions/:id", () => {

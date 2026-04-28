@@ -21,15 +21,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BeachAccess
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -71,6 +77,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -82,9 +89,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import com.chore.tracker.data.Area
 import com.chore.tracker.data.CompleteRequest
@@ -145,6 +156,7 @@ fun HomeScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
     val autoUpdate by repo.session.autoUpdateFlow.collectAsState(initial = false)
+    val collapsedAreaIds by repo.session.collapsedAreaIdsFlow.collectAsState(initial = emptySet())
     var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
 
@@ -308,28 +320,54 @@ fun HomeScreen(
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Tap + to add your first area")
                             }
-                        } else {
-                            // Search bar
-                            if (!selectAreasMode) {
-                                OutlinedTextField(
-                                    value = householdSearchQuery,
-                                    onValueChange = { householdSearchQuery = it },
-                                    placeholder = { Text("Search — name, @user, 7d, notes, yesterday") },
-                                    singleLine = true,
-                                    leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
-                                    trailingIcon = if (householdSearchQuery.isNotEmpty()) {
-                                        @Composable {
-                                            IconButton(onClick = { householdSearchQuery = "" }) {
-                                                Icon(androidx.compose.material.icons.Icons.Default.Clear, "Clear")
+                        } else if (selectAreasMode) {
+                            ReorderableAreaList(
+                                areas = state.areas,
+                                taskCount = { area -> state.tasks.count { it.areaId == area.id } },
+                                selected = selectedAreaIds,
+                                onToggle = { id ->
+                                    selectedAreaIds = if (id in selectedAreaIds) selectedAreaIds - id
+                                    else selectedAreaIds + id
+                                },
+                                onCommitReorder = { newOrder ->
+                                    scope.launch {
+                                        var failures = 0
+                                        newOrder.forEachIndexed { idx, area ->
+                                            if (area.sortOrder != idx) {
+                                                runCatching {
+                                                    repo.api.patchArea(area.id, PatchAreaRequest(sortOrder = idx))
+                                                }.onFailure { failures++ }
                                             }
                                         }
-                                    } else null,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                                        .testTag("householdSearchField"),
-                                )
-                            }
+                                        repo.refresh()
+                                        if (failures > 0) {
+                                            snackbarHost.showSnackbar(
+                                                "$failures of ${newOrder.size} order updates failed",
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        } else {
+                            // Search bar
+                            OutlinedTextField(
+                                value = householdSearchQuery,
+                                onValueChange = { householdSearchQuery = it },
+                                placeholder = { Text("Search — name, @user, 7d, notes, yesterday") },
+                                singleLine = true,
+                                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
+                                trailingIcon = if (householdSearchQuery.isNotEmpty()) {
+                                    @Composable {
+                                        IconButton(onClick = { householdSearchQuery = "" }) {
+                                            Icon(androidx.compose.material.icons.Icons.Default.Clear, "Clear")
+                                        }
+                                    }
+                                } else null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .testTag("householdSearchField"),
+                            )
                             // Filter areas + tasks based on search
                             val rawQuery = householdSearchQuery
                             val hasQuery = rawQuery.trim().isNotEmpty()
@@ -348,20 +386,6 @@ fun HomeScreen(
                             } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
                                 items(filteredAreas, key = { it.id }) { area ->
-                                    if (selectAreasMode) {
-                                        SelectableAreaCard(
-                                            area = area,
-                                            taskCount = state.tasks.count { it.areaId == area.id },
-                                            checked = area.id in selectedAreaIds,
-                                            onToggle = {
-                                                selectedAreaIds = if (area.id in selectedAreaIds)
-                                                    selectedAreaIds - area.id
-                                                else selectedAreaIds + area.id
-                                            },
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        return@items
-                                    }
                                     val areaTasks = if (!hasQuery) state.tasks.filter { it.areaId == area.id }
                                     else state.tasks.filter {
                                         it.areaId == area.id && taskMatchesHouseholdSearch(it, area, rawQuery)
@@ -370,6 +394,12 @@ fun HomeScreen(
                                         area = area,
                                         tasks = areaTasks,
                                         indicators = statusIndicators,
+                                        collapsed = area.id in collapsedAreaIds,
+                                        onToggleCollapsed = {
+                                            scope.launch {
+                                                repo.session.setAreaCollapsed(area.id, area.id !in collapsedAreaIds)
+                                            }
+                                        },
                                         onAddTask = { showAddTaskFor = area },
                                         onAddFromLibrary = { libraryForArea = area },
                                         onEditArea = { editingArea = area },
@@ -854,7 +884,7 @@ private fun HouseholdHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "$selectedCount selected",
+                if (selectedCount > 0) "$selectedCount selected" else "Drag to reorder",
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -911,10 +941,88 @@ private fun HouseholdHeader(
                 modifier = Modifier.testTag("householdMenuInvite"),
             )
             DropdownMenuItem(
-                text = { Text("Select areas…") },
+                text = { Text("Edit areas") },
                 onClick = { menuExpanded = false; onLongPressSelectAreas() },
                 modifier = Modifier.testTag("householdMenuSelectAreas"),
             )
+        }
+    }
+}
+
+/** Edit-areas mode: hand-rolled drag-reorder over a non-lazy Column.
+ *  Households are small (typically <20 areas) so no LazyColumn needed.
+ *  Eagerly mutates the in-memory list when the dragged row crosses a row
+ *  boundary, then commits the new sortOrders on drop. */
+@Composable
+private fun ReorderableAreaList(
+    areas: List<Area>,
+    taskCount: (Area) -> Int,
+    selected: Set<String>,
+    onToggle: (String) -> Unit,
+    onCommitReorder: (List<Area>) -> Unit,
+) {
+    var working by remember { mutableStateOf(areas) }
+    LaunchedEffect(areas) {
+        // Re-sync when upstream list identity changes (after refresh / delete).
+        if (working.map { it.id } != areas.map { it.id }) working = areas
+    }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val rowHeightPx = with(LocalDensity.current) { 80.dp.toPx() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(8.dp)
+            .testTag("reorderableAreaList"),
+    ) {
+        working.forEach { area ->
+            key(area.id) {
+                val isDragging = area.id == draggingId
+                Box(
+                    modifier = Modifier
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .offset {
+                            IntOffset(0, if (isDragging) dragOffsetY.roundToInt() else 0)
+                        },
+                ) {
+                    SelectableAreaCard(
+                        area = area,
+                        taskCount = taskCount(area),
+                        checked = area.id in selected,
+                        onToggle = { onToggle(area.id) },
+                        isDragging = isDragging,
+                        onDragStart = {
+                            draggingId = area.id
+                            dragOffsetY = 0f
+                        },
+                        onDrag = { delta ->
+                            dragOffsetY += delta
+                            val currentIdx = working.indexOfFirst { it.id == area.id }
+                            if (currentIdx == -1) return@SelectableAreaCard
+                            val moves = (dragOffsetY / rowHeightPx).toInt()
+                            if (moves != 0) {
+                                val targetIdx = (currentIdx + moves).coerceIn(0, working.lastIndex)
+                                if (targetIdx != currentIdx) {
+                                    val newList = working.toMutableList().apply {
+                                        add(targetIdx, removeAt(currentIdx))
+                                    }
+                                    working = newList
+                                    dragOffsetY -= (targetIdx - currentIdx) * rowHeightPx
+                                }
+                            }
+                        },
+                        onDragEnd = {
+                            val toCommit = working
+                            draggingId = null
+                            dragOffsetY = 0f
+                            onCommitReorder(toCommit)
+                        },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
         }
     }
 }
@@ -925,14 +1033,21 @@ private fun SelectableAreaCard(
     taskCount: Int,
     checked: Boolean,
     onToggle: () -> Unit,
+    isDragging: Boolean = false,
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: () -> Unit = {},
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("selectableAreaCard:${area.name}"),
         colors = CardDefaults.cardColors(
-            containerColor = if (checked) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = when {
+                isDragging -> MaterialTheme.colorScheme.tertiaryContainer
+                checked -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            },
         ),
     ) {
         Row(
@@ -941,6 +1056,23 @@ private fun SelectableAreaCard(
                 .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                Icons.Default.DragHandle,
+                contentDescription = "Drag to reorder",
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .testTag("areaDragHandle:${area.name}")
+                    .pointerInput(area.id) {
+                        detectDragGestures(
+                            onDragStart = { onDragStart() },
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = { onDragEnd() },
+                        ) { change, drag ->
+                            change.consume()
+                            onDrag(drag.y)
+                        }
+                    },
+            )
             androidx.compose.material3.Checkbox(
                 checked = checked,
                 onCheckedChange = { onToggle() },
@@ -1079,6 +1211,8 @@ private fun AreaCard(
     area: Area,
     tasks: List<Task>,
     indicators: StatusIndicators,
+    collapsed: Boolean,
+    onToggleCollapsed: () -> Unit,
     onAddTask: () -> Unit,
     onAddFromLibrary: () -> Unit,
     onEditArea: () -> Unit,
@@ -1100,17 +1234,29 @@ private fun AreaCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
-                            onClick = {},
+                            onClick = onToggleCollapsed,
                             onLongClick = { menuExpanded = true },
                         )
                         .testTag("areaHeader:${area.name}"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        area.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
+                    Icon(
+                        if (collapsed) Icons.Default.ChevronRight else Icons.Default.ExpandMore,
+                        contentDescription = if (collapsed) "Expand" else "Collapse",
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .testTag("areaCollapseChevron:${area.name}"),
                     )
+                    Column(Modifier.weight(1f)) {
+                        Text(area.name, style = MaterialTheme.typography.titleMedium)
+                        if (collapsed && tasks.isNotEmpty()) {
+                            Text(
+                                if (tasks.size == 1) "1 task" else "${tasks.size} tasks",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     IconButton(
                         modifier = Modifier.testTag("addTaskButton:${area.name}"),
                         onClick = onAddTask,
@@ -1149,70 +1295,72 @@ private fun AreaCard(
                     )
                 }
             }
-            // Selection bar (shown when in selection mode)
-            if (selectionMode) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .testTag("selectionBar:${area.name}"),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "${selectedIds.value.size} selected",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TextButton(
-                        enabled = selectedIds.value.isNotEmpty(),
-                        modifier = Modifier.testTag("massDeleteButton:${area.name}"),
-                        onClick = {
-                            onMassDeleteTasks(selectedIds.value.toList())
-                            selectedIds.value = emptySet()
-                            selectionMode = false
-                        },
-                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                    TextButton(
-                        onClick = {
-                            selectedIds.value = emptySet()
-                            selectionMode = false
-                        },
-                    ) { Text("Cancel") }
-                }
-            }
-            if (tasks.isEmpty()) {
-                Text("No tasks yet", style = MaterialTheme.typography.bodySmall)
-            } else {
-                tasks.sortedByDescending { it.dirtiness() }.forEach { task ->
-                    if (selectionMode) {
-                        SelectableTaskRow(
-                            task = task,
-                            checked = task.id in selectedIds.value,
-                            onToggle = {
-                                selectedIds.value = if (task.id in selectedIds.value)
-                                    selectedIds.value - task.id
-                                else selectedIds.value + task.id
+            if (!collapsed) {
+                // Selection bar (shown when in selection mode)
+                if (selectionMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .testTag("selectionBar:${area.name}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${selectedIds.value.size} selected",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TextButton(
+                            enabled = selectedIds.value.isNotEmpty(),
+                            modifier = Modifier.testTag("massDeleteButton:${area.name}"),
+                            onClick = {
+                                onMassDeleteTasks(selectedIds.value.toList())
+                                selectedIds.value = emptySet()
+                                selectionMode = false
                             },
-                        )
-                    } else {
-                        TaskRow(
-                            task = task,
-                            indicators = indicators,
-                            onTap = { onEditTask(task) },
-                            onSwipeRight = { onSwipeRightTask(task) },
-                            onSwipeLeft = { onSwipeLeftTask(task) },
-                        )
-                        Spacer(Modifier.height(6.dp))
+                        ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        TextButton(
+                            onClick = {
+                                selectedIds.value = emptySet()
+                                selectionMode = false
+                            },
+                        ) { Text("Cancel") }
                     }
                 }
+                if (tasks.isEmpty()) {
+                    Text("No tasks yet", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    tasks.sortedByDescending { it.dirtiness() }.forEach { task ->
+                        if (selectionMode) {
+                            SelectableTaskRow(
+                                task = task,
+                                checked = task.id in selectedIds.value,
+                                onToggle = {
+                                    selectedIds.value = if (task.id in selectedIds.value)
+                                        selectedIds.value - task.id
+                                    else selectedIds.value + task.id
+                                },
+                            )
+                        } else {
+                            TaskRow(
+                                task = task,
+                                indicators = indicators,
+                                onTap = { onEditTask(task) },
+                                onSwipeRight = { onSwipeRightTask(task) },
+                                onSwipeLeft = { onSwipeLeftTask(task) },
+                            )
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
+                }
+                // "+ from library" link at the bottom of each area card
+                TextButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("addFromLibraryButton:${area.name}"),
+                    onClick = onAddFromLibrary,
+                ) { Text("+ Add from library") }
             }
-            // "+ from library" link at the bottom of each area card
-            TextButton(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("addFromLibraryButton:${area.name}"),
-                onClick = onAddFromLibrary,
-            ) { Text("+ Add from library") }
         }
     }
 }
