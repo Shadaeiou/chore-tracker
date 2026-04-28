@@ -103,7 +103,9 @@ import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.Task
 import com.chore.tracker.data.UpdateInfo
 import com.chore.tracker.data.Updater
+import com.chore.tracker.data.areaNameMatchesAllTokens
 import com.chore.tracker.data.dirtiness
+import com.chore.tracker.data.taskMatchesHouseholdSearch
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
 import kotlinx.coroutines.launch
@@ -312,7 +314,7 @@ fun HomeScreen(
                                 OutlinedTextField(
                                     value = householdSearchQuery,
                                     onValueChange = { householdSearchQuery = it },
-                                    placeholder = { Text("Search areas and tasks") },
+                                    placeholder = { Text("Search — name, @user, 7d, notes, yesterday") },
                                     singleLine = true,
                                     leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
                                     trailingIcon = if (householdSearchQuery.isNotEmpty()) {
@@ -329,10 +331,15 @@ fun HomeScreen(
                                 )
                             }
                             // Filter areas + tasks based on search
-                            val q = householdSearchQuery.trim().lowercase()
-                            val filteredAreas = if (q.isEmpty()) state.areas else state.areas.filter { area ->
-                                area.name.lowercase().contains(q) ||
-                                    state.tasks.any { it.areaId == area.id && it.name.lowercase().contains(q) }
+                            val rawQuery = householdSearchQuery
+                            val hasQuery = rawQuery.trim().isNotEmpty()
+                            val filteredAreas = if (!hasQuery) state.areas else state.areas.filter { area ->
+                                val areaTaskList = state.tasks.filter { it.areaId == area.id }
+                                if (areaTaskList.isEmpty()) {
+                                    areaNameMatchesAllTokens(area, rawQuery)
+                                } else {
+                                    areaTaskList.any { taskMatchesHouseholdSearch(it, area, rawQuery) }
+                                }
                             }
                             if (filteredAreas.isEmpty()) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -355,10 +362,9 @@ fun HomeScreen(
                                         Spacer(Modifier.height(8.dp))
                                         return@items
                                     }
-                                    val areaTasks = if (q.isEmpty()) state.tasks.filter { it.areaId == area.id }
+                                    val areaTasks = if (!hasQuery) state.tasks.filter { it.areaId == area.id }
                                     else state.tasks.filter {
-                                        it.areaId == area.id &&
-                                            (area.name.lowercase().contains(q) || it.name.lowercase().contains(q))
+                                        it.areaId == area.id && taskMatchesHouseholdSearch(it, area, rawQuery)
                                     }
                                     AreaCard(
                                         area = area,
