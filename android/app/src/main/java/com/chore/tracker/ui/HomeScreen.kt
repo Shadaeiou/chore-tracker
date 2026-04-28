@@ -135,6 +135,7 @@ fun HomeScreen(
     // unified complete dialog.
     var snoozingTask by remember { mutableStateOf<SnoozeAction?>(null) }
     var notesCompletionTask by remember { mutableStateOf<Task?>(null) }
+    var viewingNotes by remember { mutableStateOf<Task?>(null) }
     var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
@@ -276,6 +277,7 @@ fun HomeScreen(
                                 state = state,
                                 onSwipeRight = { notesCompletionTask = it },
                                 onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
+                                onViewNotes = { viewingNotes = it },
                             )
                         }
                     }
@@ -700,6 +702,24 @@ fun HomeScreen(
         )
     }
 
+    // ── View notes (read-only popup from the row's notes chip) ────────────────
+    viewingNotes?.let { task ->
+        AlertDialog(
+            modifier = Modifier.testTag("viewNotesDialog:${task.name}"),
+            onDismissRequest = { viewingNotes = null },
+            title = { Text(task.name) },
+            text = {
+                Text(
+                    task.notes ?: "",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewingNotes = null }) { Text("Close") }
+            },
+        )
+    }
+
     // ── Invite code ───────────────────────────────────────────────────────────
     inviteCode?.let { code ->
         InviteCodeDialog(
@@ -955,6 +975,7 @@ private fun TodayList(
     state: com.chore.tracker.data.HouseholdState,
     onSwipeRight: (Task) -> Unit,
     onSwipeLeft: (Task) -> Unit,
+    onViewNotes: (Task) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     val startOfTomorrow = remember(now) {
@@ -1006,6 +1027,7 @@ private fun TodayList(
                 onTap = null,  // Today is read-only triage; edit lives on Household
                 onSwipeRight = { onSwipeRight(task) },
                 onSwipeLeft = { onSwipeLeft(task) },
+                onViewNotes = { onViewNotes(task) },
             )
         }
     }
@@ -1187,6 +1209,7 @@ private fun TaskRow(
     onTap: (() -> Unit)?,
     onSwipeRight: () -> Unit,
     onSwipeLeft: () -> Unit,
+    onViewNotes: (() -> Unit)? = null,
     areaName: String? = null,
 ) {
     val now = System.currentTimeMillis()
@@ -1296,6 +1319,7 @@ private fun TaskRow(
                                     text = "notes",
                                     leadingIcon = Icons.AutoMirrored.Filled.Notes,
                                     testTag = "taskNotes:${task.name}",
+                                    onClick = onViewNotes,
                                 )
                             }
                         }
@@ -1327,12 +1351,14 @@ private fun TagChip(
     text: String,
     leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     testTag: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .background(MaterialTheme.colorScheme.secondaryContainer, shape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 6.dp, vertical = 2.dp)
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
     ) {
@@ -1483,11 +1509,21 @@ private fun CompleteTaskDialog(
 ) {
     val now = remember { System.currentTimeMillis() }
     val dayMs = 86_400_000L
-    val todayDay = (now / dayMs) * dayMs
-    // Allow backdating up to a year — useful for tasks added retroactively to
-    // an app that's been used for a while ("I scrubbed the tub last weekend,
-    // adding it to the tracker now"). The backend no longer rejects "before
-    // task creation" for the same reason.
+    // The Material3 DatePicker speaks UTC-midnight millis. To stay in sync we
+    // compute "today" as UTC-midnight of the user's local date and format
+    // labels in UTC — otherwise a negative-offset timezone shifts the visible
+    // date back by one (today: 4/28 → labelled 4/27, etc.).
+    val todayDay = remember(now) {
+        val local = java.util.Calendar.getInstance()
+        local.timeInMillis = now
+        val y = local.get(java.util.Calendar.YEAR)
+        val m = local.get(java.util.Calendar.MONTH)
+        val d = local.get(java.util.Calendar.DAY_OF_MONTH)
+        val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        utc.clear(); utc.set(y, m, d)
+        utc.timeInMillis
+    }
+    // Allow backdating up to a year.
     val earliestDay = todayDay - 365L * dayMs
 
     val datePickerState = rememberDatePickerState(
@@ -1507,7 +1543,9 @@ private fun CompleteTaskDialog(
     val selectedDay = datePickerState.selectedDateMillis ?: todayDay
     val isToday = selectedDay == todayDay
     val dateLabel = remember(selectedDay) {
-        java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(selectedDay))
+        val df = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+        df.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        df.format(java.util.Date(selectedDay))
     }
 
     if (showDatePicker) {
@@ -1577,9 +1615,20 @@ private fun CompleteTaskDialog(
             TextButton(
                 modifier = Modifier.testTag("completeTaskConfirm"),
                 onClick = {
-                    // Pass `at` only when not today; otherwise let the server stamp `now`
-                    // so we don't accidentally send a past timestamp for "today".
-                    val at = if (isToday) null else selectedDay
+                    // For "today" let the server stamp `now`. For backdated days,
+                    // map UTC-midnight-of-picked-date back to local noon of the
+                    // same calendar day — this keeps last_done_at on the day the
+                    // user actually picked regardless of timezone offset.
+                    val at = if (isToday) null else run {
+                        val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+                        utc.timeInMillis = selectedDay
+                        val y = utc.get(java.util.Calendar.YEAR)
+                        val m = utc.get(java.util.Calendar.MONTH)
+                        val d = utc.get(java.util.Calendar.DAY_OF_MONTH)
+                        val local = java.util.Calendar.getInstance()
+                        local.clear(); local.set(y, m, d, 12, 0, 0)
+                        local.timeInMillis
+                    }
                     onConfirm(at, notes.trim(), selectedMember?.id)
                 },
             ) { Text("Complete") }
