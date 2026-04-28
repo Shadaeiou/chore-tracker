@@ -512,6 +512,68 @@ describe("PATCH /api/areas/:id", () => {
   });
 });
 
+describe("DELETE /api/completions/:id", () => {
+  async function seedAndComplete(): Promise<{ token: string; taskId: string }> {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 7 }),
+    })).json()) as { id: string };
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: auth.token });
+    return { token: auth.token, taskId: task.id };
+  }
+
+  it("deletes a specific completion and recomputes last_done_at", async () => {
+    const { token, taskId } = await seedAndComplete();
+    const activity = (await (await api("/api/activity", { token })).json()) as Array<{ id: string }>;
+    const completionId = activity[0].id;
+
+    const res = await api(`/api/completions/${completionId}`, { method: "DELETE", token });
+    expect(res.status).toBe(200);
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; lastDoneAt: number | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.lastDoneAt).toBeNull();
+  });
+
+  it("recomputes last_done_at to the prior completion when one remains", async () => {
+    const { token, taskId } = await seedAndComplete();
+    await new Promise((r) => setTimeout(r, 5));
+    await api(`/api/tasks/${taskId}/complete`, { method: "POST", token });
+    const activity = (await (await api("/api/activity", { token })).json()) as Array<{ id: string; doneAt: number }>;
+    const newest = activity[0]; // DESC order
+
+    await api(`/api/completions/${newest.id}`, { method: "DELETE", token });
+
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; lastDoneAt: number | null;
+    }>;
+    // Should now reflect the older completion's timestamp
+    expect(tasks.find((t) => t.id === taskId)?.lastDoneAt).toBe(activity[1].doneAt);
+  });
+
+  it("rejects cross-household completion delete", async () => {
+    const { token } = await seedAndComplete();
+    const activity = (await (await api("/api/activity", { token })).json()) as Array<{ id: string }>;
+    const bob = await register();
+    const res = await api(`/api/completions/${activity[0].id}`, { method: "DELETE", token: bob.token });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for unknown completion id", async () => {
+    const auth = await register();
+    const res = await api("/api/completions/00000000-0000-0000-0000-000000000000", {
+      method: "DELETE", token: auth.token,
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("cross-household delete guards", () => {
   it("rejects deleting another household's area", async () => {
     const alice = await register();

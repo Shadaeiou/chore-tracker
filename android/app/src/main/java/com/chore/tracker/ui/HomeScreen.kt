@@ -329,6 +329,16 @@ fun HomeScreen(
                 1 -> ActivityScreen(
                     activity = state.activity,
                     modifier = Modifier.fillMaxSize(),
+                    onUndo = { entry ->
+                        scope.launch {
+                            runCatching { repo.api.deleteCompletion(entry.id) }
+                                .onSuccess {
+                                    repo.refresh()
+                                    snackbarHost.showSnackbar("Completion undone")
+                                }
+                                .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
+                        }
+                    },
                 )
             }
         }

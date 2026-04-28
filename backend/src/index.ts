@@ -670,6 +670,30 @@ app.get("/api/household/workload", async (c) => {
   return c.json(results);
 });
 
+// Delete an arbitrary completion by id (used by Activity tab undo).
+app.delete("/api/completions/:id", async (c) => {
+  const { hh } = c.get("user");
+  const completionId = c.req.param("id");
+
+  const row = await c.env.DB.prepare(
+    `SELECT c.id, c.task_id FROM completions c
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE c.id = ? AND a.household_id = ?`,
+  ).bind(completionId, hh).first<{ id: string; task_id: string }>();
+  if (!row) throw new HTTPException(404);
+
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM completions WHERE id = ?").bind(completionId),
+    c.env.DB.prepare(
+      `UPDATE tasks SET last_done_at = (
+         SELECT MAX(done_at) FROM completions WHERE task_id = ?
+       ) WHERE id = ?`,
+    ).bind(row.task_id, row.task_id),
+  ]);
+  return c.json({ ok: true });
+});
+
 app.delete("/api/tasks/:id", async (c) => {
   const { hh } = c.get("user");
   const id = c.req.param("id");

@@ -95,6 +95,12 @@ class FakeApi : ChoreApi {
         undone.add(id)
         tasks.replaceAll { if (it.id == id) it.copy(lastDoneAt = null, lastDoneBy = null) else it }
     }
+    val deletedCompletions = mutableListOf<String>()
+    override suspend fun deleteCompletion(id: String) {
+        maybeThrow()
+        deletedCompletions.add(id)
+        activityFeed.removeAll { it.id == id }
+    }
     override suspend fun deleteTask(id: String) { maybeThrow(); tasks.removeAll { it.id == id } }
     override suspend fun activity(before: Long?, limit: Int?): List<ActivityEntry> {
         maybeThrow(); return activityFeed.toList()
