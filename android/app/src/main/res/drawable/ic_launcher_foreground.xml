@@ -10,17 +10,17 @@
          layout because it's not subject to the launcher mask. -->
     <path
         android:fillColor="#FAFAFA"
-        android:pathData="M40,34 H64 V58 H76 V76 H40 Z"/>
+        android:pathData="M36,33 H60 V57 H72 V75 H36 Z"/>
     <path
         android:fillColor="#D32F2F"
-        android:pathData="M40,34 H64 V40 H40 Z"/>
+        android:pathData="M36,33 H60 V39 H36 Z"/>
     <path
         android:fillColor="#FBC02D"
-        android:pathData="M40,42 H64 V47 H40 Z"/>
+        android:pathData="M36,41 H60 V46 H36 Z"/>
     <path
         android:fillColor="#388E3C"
-        android:pathData="M40,49 H64 V54 H40 Z"/>
+        android:pathData="M36,48 H60 V53 H36 Z"/>
     <path
         android:fillColor="#90CAF9"
-        android:pathData="M70,66 H76 V76 H70 Z"/>
+        android:pathData="M66,65 H72 V75 H66 Z"/>
 </vector>
