@@ -31,12 +31,14 @@ interface Session {
     val themeModeFlow: Flow<ThemeMode>
     val themePaletteFlow: Flow<ThemePalette>
     val statusIndicatorsFlow: Flow<StatusIndicators>
+    val autoUpdateFlow: Flow<Boolean>
     suspend fun token(): String?
     suspend fun setToken(value: String?)
     suspend fun setThemeMode(mode: ThemeMode)
     suspend fun setThemePalette(palette: ThemePalette)
     suspend fun setStatusIndicator(key: StatusKey, value: String)
     suspend fun setStatusColor(key: StatusKey, hex: String)
+    suspend fun setAutoUpdate(enabled: Boolean)
     suspend fun fcmToken(): String?
     suspend fun setFcmToken(value: String?)
 }
@@ -54,6 +56,7 @@ class DataStoreSession(private val context: Context) : Session {
     private val statusOverdueColorKey = stringPreferencesKey("status_overdue_color")
     private val statusDueTodayColorKey = stringPreferencesKey("status_due_today_color")
     private val statusNotDueColorKey = stringPreferencesKey("status_not_due_color")
+    private val autoUpdateKey = stringPreferencesKey("auto_update_enabled")
 
     override val tokenFlow: Flow<String?> =
         context.dataStore.data.map { it[tokenKey] }
@@ -72,6 +75,9 @@ class DataStoreSession(private val context: Context) : Session {
             runCatching { ThemePalette.valueOf(prefs[paletteKey] ?: "GREEN") }
                 .getOrDefault(ThemePalette.GREEN)
         }
+
+    override val autoUpdateFlow: Flow<Boolean> =
+        context.dataStore.data.map { it[autoUpdateKey] == "true" }
 
     override val statusIndicatorsFlow: Flow<StatusIndicators> =
         context.dataStore.data.map { prefs ->
@@ -123,6 +129,10 @@ class DataStoreSession(private val context: Context) : Session {
         }
     }
 
+    override suspend fun setAutoUpdate(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[autoUpdateKey] = enabled.toString() }
+    }
+
     override suspend fun fcmToken(): String? =
         context.dataStore.data.map { it[fcmKey] }.first()
 
@@ -142,10 +152,12 @@ class InMemorySession(
     private val themeState = MutableStateFlow(initialTheme)
     private val paletteState = MutableStateFlow(ThemePalette.GREEN)
     private val indicatorsState = MutableStateFlow(StatusIndicators())
+    private val autoUpdateState = MutableStateFlow(false)
     override val tokenFlow: Flow<String?> = tokenState
     override val themeModeFlow: Flow<ThemeMode> = themeState
     override val themePaletteFlow: Flow<ThemePalette> = paletteState
     override val statusIndicatorsFlow: Flow<StatusIndicators> = indicatorsState
+    override val autoUpdateFlow: Flow<Boolean> = autoUpdateState
     override suspend fun token(): String? = tokenState.value
     override suspend fun setToken(value: String?) { tokenState.value = value }
     override suspend fun setThemeMode(mode: ThemeMode) { themeState.value = mode }
@@ -164,6 +176,7 @@ class InMemorySession(
             StatusKey.NOT_DUE -> indicatorsState.value.copy(notDueColor = hex)
         }
     }
+    override suspend fun setAutoUpdate(enabled: Boolean) { autoUpdateState.value = enabled }
     private var _fcmToken: String? = null
     override suspend fun fcmToken() = _fcmToken
     override suspend fun setFcmToken(value: String?) { _fcmToken = value }

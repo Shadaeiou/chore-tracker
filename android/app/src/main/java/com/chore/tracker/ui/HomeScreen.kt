@@ -100,9 +100,13 @@ import com.chore.tracker.data.PatchAreaRequest
 import com.chore.tracker.data.PatchHouseholdRequest
 import com.chore.tracker.data.PatchTaskRequest
 import com.chore.tracker.data.Repo
+import com.chore.tracker.BuildConfig
+import com.chore.tracker.data.DownloadResult
 import com.chore.tracker.data.SnoozeRequest
 import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.Task
+import com.chore.tracker.data.UpdateInfo
+import com.chore.tracker.data.Updater
 import com.chore.tracker.data.dirtiness
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
@@ -142,6 +146,16 @@ fun HomeScreen(
     val snackbarHost = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
     val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
+    val autoUpdate by repo.session.autoUpdateFlow.collectAsState(initial = false)
+    var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateDownloading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(autoUpdate) {
+        if (!autoUpdate) return@LaunchedEffect
+        runCatching {
+            Updater(context.applicationContext).checkForUpdate(BuildConfig.VERSION_CODE)
+        }.getOrNull()?.let { pendingUpdate = it }
+    }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -693,6 +707,53 @@ fun HomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = { viewingNotes = null }) { Text("Close") }
+            },
+        )
+    }
+
+    // ── Auto-update prompt (when enabled in Settings) ─────────────────────────
+    pendingUpdate?.let { info ->
+        AlertDialog(
+            modifier = Modifier.testTag("autoUpdateDialog"),
+            onDismissRequest = { pendingUpdate = null },
+            title = { Text("Update available") },
+            text = {
+                Column {
+                    Text("Version ${info.versionName} is ready to install.")
+                    if (updateDownloading) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Downloading…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !updateDownloading,
+                    onClick = {
+                        updateDownloading = true
+                        scope.launch {
+                            val updater = Updater(context.applicationContext)
+                            val id = updater.startDownload(info)
+                            when (val r = updater.awaitDownload(id)) {
+                                DownloadResult.Success -> updater.launchInstall(id)
+                                is DownloadResult.Failure ->
+                                    snackbarHost.showSnackbar("Update failed: ${r.reason}")
+                            }
+                            pendingUpdate = null
+                            updateDownloading = false
+                        }
+                    },
+                ) { Text("Update") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !updateDownloading,
+                    onClick = { pendingUpdate = null },
+                ) { Text("Later") }
             },
         )
     }

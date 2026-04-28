@@ -51,12 +51,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.chore.tracker.BuildConfig
+import com.chore.tracker.data.DownloadResult
 import com.chore.tracker.data.PatchHouseholdRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
 import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.StatusKey
+import com.chore.tracker.data.UpdateInfo
+import com.chore.tracker.data.Updater
 import kotlinx.coroutines.launch
 
 private val INDICATOR_PRESETS = listOf(
@@ -75,13 +79,16 @@ fun SettingsScreen(
     onSignOut: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val themeMode by session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
     val palette by session.themePaletteFlow.collectAsState(initial = ThemePalette.GREEN)
     val indicators by session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
+    val autoUpdate by session.autoUpdateFlow.collectAsState(initial = false)
     val houseState = repo?.state?.collectAsState()
     val isPaused = houseState?.value?.pausedUntil?.let { it > System.currentTimeMillis() } == true
 
     var pickingColorFor by remember { mutableStateOf<StatusKey?>(null) }
+    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
 
     Scaffold(
         topBar = {
@@ -205,6 +212,73 @@ fun SettingsScreen(
                 onPickColor = { pickingColorFor = StatusKey.NOT_DUE },
             )
 
+            // Auto-update.
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text("Updates", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .testTag("autoUpdateToggle"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Auto-check on launch", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Look for a newer build on GitHub when the app starts.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = autoUpdate,
+                    onCheckedChange = { scope.launch { session.setAutoUpdate(it) } },
+                )
+            }
+            Button(
+                onClick = {
+                    if (updateState is UpdateUiState.Idle ||
+                        updateState is UpdateUiState.UpToDate ||
+                        updateState is UpdateUiState.Error) {
+                        updateState = UpdateUiState.Checking
+                        scope.launch {
+                            val updater = Updater(context.applicationContext)
+                            val info = updater.checkForUpdate(BuildConfig.VERSION_CODE)
+                            updateState = if (info == null) UpdateUiState.UpToDate
+                            else UpdateUiState.Available(info)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("checkUpdatesButton"),
+            ) {
+                Text(
+                    when (updateState) {
+                        is UpdateUiState.Checking -> "Checking…"
+                        is UpdateUiState.Downloading -> "Downloading…"
+                        else -> "Check for updates"
+                    }
+                )
+            }
+            when (val s = updateState) {
+                is UpdateUiState.UpToDate -> Text(
+                    "You're on the latest build (${BuildConfig.VERSION_NAME}).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                is UpdateUiState.Error -> Text(
+                    s.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                else -> {}
+            }
+
             Spacer(Modifier.height(24.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
@@ -235,6 +309,49 @@ fun SettingsScreen(
                     .testTag("versionText"),
             )
         }
+    }
+
+    (updateState as? UpdateUiState.Available)?.let { available ->
+        AlertDialog(
+            modifier = Modifier.testTag("updateAvailableDialog"),
+            onDismissRequest = { updateState = UpdateUiState.Idle },
+            title = { Text("Update available") },
+            text = {
+                Column {
+                    Text("Version ${available.info.versionName} is ready to install.")
+                    if (!available.info.notes.isNullOrBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            available.info.notes,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val info = available.info
+                    updateState = UpdateUiState.Downloading
+                    scope.launch {
+                        val updater = Updater(context.applicationContext)
+                        val id = updater.startDownload(info)
+                        when (val r = updater.awaitDownload(id)) {
+                            DownloadResult.Success -> {
+                                updater.launchInstall(id)
+                                updateState = UpdateUiState.Idle
+                            }
+                            is DownloadResult.Failure -> {
+                                updateState = UpdateUiState.Error("Download failed: ${r.reason}")
+                            }
+                        }
+                    }
+                }) { Text("Update") }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateState = UpdateUiState.Idle }) { Text("Later") }
+            },
+        )
     }
 
     pickingColorFor?.let { key ->
@@ -416,6 +533,15 @@ private fun Color.toHex(): String = String.format(
     (green * 255).toInt(),
     (blue * 255).toInt(),
 )
+
+private sealed class UpdateUiState {
+    data object Idle : UpdateUiState()
+    data object Checking : UpdateUiState()
+    data class Available(val info: UpdateInfo) : UpdateUiState()
+    data object Downloading : UpdateUiState()
+    data object UpToDate : UpdateUiState()
+    data class Error(val message: String) : UpdateUiState()
+}
 
 internal fun String.parseHexOrNull(): Color? {
     if (isBlank()) return null
