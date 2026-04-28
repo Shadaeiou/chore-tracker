@@ -13,6 +13,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class HouseholdState(
+    val household: Household? = null,
     val areas: List<Area> = emptyList(),
     val tasks: List<Task> = emptyList(),
     val members: List<Member> = emptyList(),
@@ -84,6 +85,7 @@ class Repo(
             val activity = api.activity()
             val workload = api.workload()
             _state.value = HouseholdState(
+                household = household.household,
                 areas = areas,
                 tasks = tasks,
                 members = household.members,

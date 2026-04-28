@@ -118,6 +118,9 @@ fun HomeScreen(
     var showAddTaskFor by remember { mutableStateOf<Area?>(null) }
     var editingArea by remember { mutableStateOf<Area?>(null) }
     var deletingArea by remember { mutableStateOf<Area?>(null) }
+    var copyingArea by remember { mutableStateOf<Area?>(null) }
+    var renamingHousehold by remember { mutableStateOf(false) }
+    var libraryForArea by remember { mutableStateOf<Area?>(null) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var snoozingTask by remember { mutableStateOf<Task?>(null) }
@@ -293,7 +296,7 @@ fun HomeScreen(
                         }
                     }
                 }
-                // ── Areas tab: hierarchical view for managing areas + tasks ──
+                // ── Household tab: hierarchical view for managing areas + tasks ──
                 1 -> PullToRefreshBox(
                     state = pullState,
                     isRefreshing = state.isLoading,
@@ -302,6 +305,34 @@ fun HomeScreen(
                 ) {
                     Column(Modifier.fillMaxSize()) {
                         TabHeader(state, repo, scope, snackbarHost)
+                        // Household header: name + rename
+                        state.household?.let { hh ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    .testTag("householdHeader"),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        hh.name,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        modifier = Modifier.testTag("householdName"),
+                                    )
+                                    val memberWord = if (state.members.size == 1) "member" else "members"
+                                    Text(
+                                        "${state.members.size} $memberWord",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(
+                                    modifier = Modifier.testTag("renameHouseholdButton"),
+                                    onClick = { renamingHousehold = true },
+                                ) { Text("Rename") }
+                            }
+                        }
                         if (state.areas.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Tap + to add your first area")
@@ -313,10 +344,27 @@ fun HomeScreen(
                                         area = area,
                                         tasks = state.tasks.filter { it.areaId == area.id },
                                         onAddTask = { showAddTaskFor = area },
+                                        onAddFromLibrary = { libraryForArea = area },
                                         onEditArea = { editingArea = area },
+                                        onCopyArea = { copyingArea = area },
                                         onDeleteArea = { deletingArea = area },
                                         onEditTask = { task -> editingTask = task },
                                         onDeleteTask = { task -> deletingTask = task },
+                                        onMassDeleteTasks = { taskIds ->
+                                            scope.launch {
+                                                var failures = 0
+                                                taskIds.forEach { id ->
+                                                    runCatching { repo.api.deleteTask(id) }
+                                                        .onFailure { failures++ }
+                                                }
+                                                repo.refresh()
+                                                if (failures == 0) {
+                                                    snackbarHost.showSnackbar("Deleted ${taskIds.size} task${if (taskIds.size == 1) "" else "s"}")
+                                                } else {
+                                                    snackbarHost.showSnackbar("$failures of ${taskIds.size} deletes failed")
+                                                }
+                                            }
+                                        },
                                         onSnoozeTask = { task -> snoozingTask = task },
                                         onMarkDoneAt = { task -> retroactiveTask = task },
                                         onComplete = onCompleteTask,
@@ -376,6 +424,74 @@ fun HomeScreen(
                     runCatching { repo.api.patchArea(area.id, PatchAreaRequest(name = name)) }
                         .onSuccess { repo.refresh() }
                         .onFailure { snackbarHost.showSnackbar("Failed to rename area: ${it.message}") }
+                }
+            },
+        )
+    }
+
+    // ── Add from library (multi-select) ───────────────────────────────────────
+    libraryForArea?.let { area ->
+        MultiTemplatePicker(
+            repo = repo,
+            preferredArea = area.name.lowercase(),
+            onDismiss = { libraryForArea = null },
+            onConfirm = { templateIds ->
+                libraryForArea = null
+                scope.launch {
+                    var failures = 0
+                    templateIds.forEach { tmplId ->
+                        runCatching {
+                            repo.api.createTask(CreateTaskRequest(areaId = area.id, templateId = tmplId))
+                        }.onFailure { failures++ }
+                    }
+                    repo.refresh()
+                    if (failures == 0) {
+                        snackbarHost.showSnackbar("Added ${templateIds.size} task${if (templateIds.size == 1) "" else "s"}")
+                    } else {
+                        snackbarHost.showSnackbar("$failures of ${templateIds.size} adds failed")
+                    }
+                }
+            },
+        )
+    }
+
+    // ── Rename household ──────────────────────────────────────────────────────
+    if (renamingHousehold) {
+        val current = state.household?.name ?: ""
+        TextDialog(
+            title = "Rename household",
+            label = "Household name",
+            initialValue = current,
+            confirmLabel = "Save",
+            onDismiss = { renamingHousehold = false },
+            onConfirm = { name ->
+                renamingHousehold = false
+                scope.launch {
+                    runCatching { repo.api.renameHousehold(com.chore.tracker.data.RenameHouseholdRequest(name)) }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Rename failed: ${it.message}") }
+                }
+            },
+        )
+    }
+
+    // ── Copy area ─────────────────────────────────────────────────────────────
+    copyingArea?.let { area ->
+        TextDialog(
+            title = "Copy \"${area.name}\" as…",
+            label = "Name for the copy",
+            initialValue = "${area.name} copy",
+            confirmLabel = "Copy",
+            onDismiss = { copyingArea = null },
+            onConfirm = { name ->
+                copyingArea = null
+                scope.launch {
+                    runCatching { repo.api.copyArea(area.id, com.chore.tracker.data.CopyAreaRequest(name)) }
+                        .onSuccess {
+                            repo.refresh()
+                            snackbarHost.showSnackbar("Copied to \"$name\"")
+                        }
+                        .onFailure { snackbarHost.showSnackbar("Copy failed: ${it.message}") }
                 }
             },
         )
@@ -729,15 +845,20 @@ private fun AreaCard(
     area: Area,
     tasks: List<Task>,
     onAddTask: () -> Unit,
+    onAddFromLibrary: () -> Unit,
     onEditArea: () -> Unit,
+    onCopyArea: () -> Unit,
     onDeleteArea: () -> Unit,
     onEditTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onMassDeleteTasks: (List<String>) -> Unit,
     onSnoozeTask: (Task) -> Unit,
     onMarkDoneAt: (Task) -> Unit,
     onComplete: (Task) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var selectionMode by remember { mutableStateOf(false) }
+    val selectedIds = remember { mutableStateOf(setOf<String>()) }
 
     Card(modifier = Modifier.fillMaxWidth().testTag("areaCard:${area.name}")) {
         Column(Modifier.padding(12.dp)) {
@@ -773,27 +894,120 @@ private fun AreaCard(
                         modifier = Modifier.testTag("areaMenuEdit:${area.name}"),
                     )
                     DropdownMenuItem(
+                        text = { Text("Copy as…") },
+                        onClick = { menuExpanded = false; onCopyArea() },
+                        modifier = Modifier.testTag("areaMenuCopy:${area.name}"),
+                    )
+                    if (tasks.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(if (selectionMode) "Done selecting" else "Select tasks…") },
+                            onClick = {
+                                menuExpanded = false
+                                selectionMode = !selectionMode
+                                if (!selectionMode) selectedIds.value = emptySet()
+                            },
+                            modifier = Modifier.testTag("areaMenuSelect:${area.name}"),
+                        )
+                    }
+                    DropdownMenuItem(
                         text = { Text("Delete area", color = MaterialTheme.colorScheme.error) },
                         onClick = { menuExpanded = false; onDeleteArea() },
                         modifier = Modifier.testTag("areaMenuDelete:${area.name}"),
                     )
                 }
             }
+            // Selection bar (shown when in selection mode)
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .testTag("selectionBar:${area.name}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${selectedIds.value.size} selected",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(
+                        enabled = selectedIds.value.isNotEmpty(),
+                        modifier = Modifier.testTag("massDeleteButton:${area.name}"),
+                        onClick = {
+                            onMassDeleteTasks(selectedIds.value.toList())
+                            selectedIds.value = emptySet()
+                            selectionMode = false
+                        },
+                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    TextButton(
+                        onClick = {
+                            selectedIds.value = emptySet()
+                            selectionMode = false
+                        },
+                    ) { Text("Cancel") }
+                }
+            }
             if (tasks.isEmpty()) {
                 Text("No tasks yet", style = MaterialTheme.typography.bodySmall)
             } else {
                 tasks.sortedByDescending { it.dirtiness() }.forEach { task ->
-                    TaskRow(
-                        task = task,
-                        onComplete = { onComplete(task) },
-                        onEdit = { onEditTask(task) },
-                        onDelete = { onDeleteTask(task) },
-                        onSnooze = { onSnoozeTask(task) },
-                        onMarkDoneAt = { onMarkDoneAt(task) },
-                    )
+                    if (selectionMode) {
+                        SelectableTaskRow(
+                            task = task,
+                            checked = task.id in selectedIds.value,
+                            onToggle = {
+                                selectedIds.value = if (task.id in selectedIds.value)
+                                    selectedIds.value - task.id
+                                else selectedIds.value + task.id
+                            },
+                        )
+                    } else {
+                        TaskRow(
+                            task = task,
+                            onComplete = { onComplete(task) },
+                            onEdit = { onEditTask(task) },
+                            onDelete = { onDeleteTask(task) },
+                            onSnooze = { onSnoozeTask(task) },
+                            onMarkDoneAt = { onMarkDoneAt(task) },
+                        )
+                    }
                 }
             }
+            // "+ from library" link at the bottom of each area card
+            TextButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("addFromLibraryButton:${area.name}"),
+                onClick = onAddFromLibrary,
+            ) { Text("+ Add from library") }
         }
+    }
+}
+
+@Composable
+private fun SelectableTaskRow(
+    task: Task,
+    checked: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .testTag("selectableTaskRow:${task.name}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.Checkbox(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            modifier = Modifier.testTag("selectableCheckbox:${task.name}"),
+        )
+        Text(task.name, modifier = Modifier.weight(1f))
+        Text(
+            "every ${task.frequencyDays}d",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -1180,6 +1394,94 @@ private fun TaskFormDialog(
             },
         )
     }
+}
+
+@Composable
+private fun MultiTemplatePicker(
+    repo: Repo,
+    preferredArea: String,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    var templates by remember { mutableStateOf<List<com.chore.tracker.data.TaskTemplate>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val selected = remember { mutableStateOf(setOf<String>()) }
+
+    LaunchedEffect(Unit) {
+        runCatching { repo.api.taskTemplates() }
+            .onSuccess { templates = it }
+            .onFailure { error = it.message }
+    }
+
+    val filtered = remember(templates, preferredArea) {
+        val areaLabelToKey = mapOf("living room" to "living", "whole home" to "general")
+        val normalized = areaLabelToKey[preferredArea] ?: preferredArea
+        val matched = templates.filter { tmpl ->
+            tmpl.suggestedArea == normalized
+                || tmpl.suggestedArea in normalized
+                || normalized in tmpl.suggestedArea
+        }
+        if (matched.isNotEmpty()) matched else templates
+    }
+
+    AlertDialog(
+        modifier = Modifier.testTag("multiLibraryPicker"),
+        onDismissRequest = onDismiss,
+        title = { Text("Add tasks from library") },
+        text = {
+            Column {
+                if (error != null) {
+                    Text("Couldn't load: $error", color = MaterialTheme.colorScheme.error)
+                } else if (templates.isEmpty()) {
+                    Text("Loading…")
+                } else {
+                    Text(
+                        "${selected.value.size} selected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                        items(filtered, key = { it.id }) { tmpl ->
+                            val isSel = tmpl.id in selected.value
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .testTag("multiTemplate:${tmpl.id}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                androidx.compose.material3.Checkbox(
+                                    checked = isSel,
+                                    onCheckedChange = {
+                                        selected.value = if (isSel)
+                                            selected.value - tmpl.id
+                                        else selected.value + tmpl.id
+                                    },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(tmpl.name)
+                                    Text(
+                                        "every ${tmpl.suggestedFrequencyDays}d · effort ${tmpl.suggestedEffort}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selected.value.isNotEmpty(),
+                modifier = Modifier.testTag("multiLibraryConfirm"),
+                onClick = { onConfirm(selected.value.toList()) },
+            ) { Text("Add ${selected.value.size}") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
