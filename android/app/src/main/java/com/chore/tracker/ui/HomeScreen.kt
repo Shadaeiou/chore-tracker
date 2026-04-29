@@ -233,13 +233,17 @@ fun HomeScreen(
     // Areas not in the saved order — newly-added ones, or fresh installs —
     // fall to the end in createdAt order.
     val visibleAreas = remember(state.areas, pendingDeletedAreaIds, areaOrder) {
-        val orderIndex = areaOrder.withIndex().associate { (i, id) -> id to i }
+        val orderIndex: Map<String, Int> = areaOrder
+            .mapIndexed { idx, id -> id to idx }
+            .toMap()
         state.areas
             .filter { it.id !in pendingDeletedAreaIds }
-            .sortedWith(compareBy(
-                { orderIndex[it.id] ?: Int.MAX_VALUE },
-                { it.createdAt },
-            ))
+            .sortedWith(
+                compareBy<Area>(
+                    { orderIndex[it.id] ?: Int.MAX_VALUE },
+                    { it.createdAt },
+                ),
+            )
     }
     val visibleTasks = remember(state.tasks, pendingDeletedTaskIds, pendingDeletedAreaIds) {
         state.tasks.filter {

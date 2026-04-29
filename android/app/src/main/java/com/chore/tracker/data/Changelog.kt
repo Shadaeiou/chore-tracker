@@ -14,6 +14,13 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.42",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Fix Kotlin compile failure in the visible-areas sort — the destructuring lambda was tripping type inference",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.41",
         date = "2026-04-29",
         bullets = listOf(
