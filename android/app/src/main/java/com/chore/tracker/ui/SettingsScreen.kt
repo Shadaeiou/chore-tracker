@@ -367,6 +367,8 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .testTag("versionText"),
             )
+            Spacer(Modifier.height(8.dp))
+            ChangelogSection()
         }
     }
 
@@ -584,6 +586,66 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.SYSTEM -> "Match system"
     ThemeMode.LIGHT -> "Light"
     ThemeMode.DARK -> "Dark"
+}
+
+/** Latest release shown expanded; tap to reveal the rest of the history. */
+@Composable
+private fun ChangelogSection() {
+    if (com.chore.tracker.data.CHANGELOG.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
+    val latest = com.chore.tracker.data.CHANGELOG.first()
+    val older = com.chore.tracker.data.CHANGELOG.drop(1)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .testTag("changelogSection"),
+    ) {
+        Text(
+            "What's new",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        ReleaseEntry(latest)
+        if (older.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("changelogToggle"),
+                onClick = { expanded = !expanded },
+            ) { Text(if (expanded) "Hide older updates" else "Show all updates") }
+            if (expanded) {
+                older.forEach { entry ->
+                    ReleaseEntry(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseEntry(entry: com.chore.tracker.data.ReleaseNote) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .testTag("changelogEntry:${entry.version}"),
+    ) {
+        Text(
+            "${entry.version} · ${entry.date}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        entry.bullets.forEach { line ->
+            Text(
+                "• $line",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+            )
+        }
+    }
 }
 
 private fun Color.toHex(): String = String.format(
