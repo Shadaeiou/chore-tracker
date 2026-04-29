@@ -155,6 +155,7 @@ fun HomeScreen(
     var snoozingTask by remember { mutableStateOf<SnoozeAction?>(null) }
     var notesCompletionTask by remember { mutableStateOf<Task?>(null) }
     var viewingNotes by remember { mutableStateOf<Task?>(null) }
+    var reassigningTask by remember { mutableStateOf<Task?>(null) }
     var wizardSkipped by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     val pullState = rememberPullToRefreshState()
@@ -346,9 +347,13 @@ fun HomeScreen(
                                 onSwipeRight = { notesCompletionTask = it },
                                 onSwipeLeft = { snoozingTask = SnoozeAction(it, allowDelete = false) },
                                 onViewNotes = { viewingNotes = it },
-                                onAddTodo = { text, isPublic ->
+                                onAddTodo = { text, isPublic, ownerId ->
                                     scope.launch {
-                                        runCatching { repo.api.createTodo(CreateTodoRequest(text, isPublic)) }
+                                        runCatching {
+                                            repo.api.createTodo(
+                                                CreateTodoRequest(text, isPublic, ownerId),
+                                            )
+                                        }
                                             .onSuccess { repo.refresh() }
                                             .onFailure { snackbarHost.showSnackbar("Couldn't add: ${it.message}") }
                                     }
@@ -368,6 +373,7 @@ fun HomeScreen(
                                             .onFailure { snackbarHost.showSnackbar("Couldn't delete: ${it.message}") }
                                     }
                                 },
+                                onReassignTask = { task -> reassigningTask = task },
                             )
                         }
                     }
@@ -740,6 +746,30 @@ fun HomeScreen(
                     }
                         .onSuccess { repo.refresh() }
                         .onFailure { snackbarHost.showSnackbar("Failed to update task: ${it.message}") }
+                }
+            },
+        )
+    }
+
+    // ── Reassign (Today-tab tap) ─────────────────────────────────────────
+    reassigningTask?.let { task ->
+        ReassignTaskDialog(
+            task = task,
+            members = state.members,
+            onDismiss = { reassigningTask = null },
+            onConfirm = { newAssignee ->
+                reassigningTask = null
+                if (newAssignee != task.assignedTo) {
+                    scope.launch {
+                        runCatching {
+                            repo.api.patchTask(
+                                task.id,
+                                PatchTaskRequest(assignedTo = newAssignee),
+                            )
+                        }
+                            .onSuccess { repo.refresh() }
+                            .onFailure { snackbarHost.showSnackbar("Reassign failed: ${it.message}") }
+                    }
                 }
             },
         )
@@ -1232,9 +1262,10 @@ private fun TodayList(
     onSwipeRight: (Task) -> Unit,
     onSwipeLeft: (Task) -> Unit,
     onViewNotes: (Task) -> Unit,
-    onAddTodo: (text: String, isPublic: Boolean) -> Unit,
+    onAddTodo: (text: String, isPublic: Boolean, ownerId: String?) -> Unit,
     onToggleTodoDone: (TodoItem, done: Boolean) -> Unit,
     onDeleteTodo: (TodoItem) -> Unit,
+    onReassignTask: (Task) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     val startOfTomorrow = remember(now) {
@@ -1339,7 +1370,9 @@ private fun TodayList(
                     task = task,
                     areaName = areaNamesById[task.areaId],
                     indicators = indicators,
-                    onTap = null,  // Today is read-only triage; edit lives on Household
+                    // Tapping a Today row reassigns it — useful when you can't
+                    // do something today and want to hand it off.
+                    onTap = { onReassignTask(task) },
                     onSwipeRight = { onSwipeRight(task) },
                     onSwipeLeft = { onSwipeLeft(task) },
                     onViewNotes = { onViewNotes(task) },
@@ -1371,7 +1404,7 @@ private fun TodayList(
                     task = task,
                     areaName = areaNamesById[task.areaId],
                     indicators = indicators,
-                    onTap = null,
+                    onTap = { onReassignTask(task) },
                     onSwipeRight = { onSwipeRight(task) },
                     onSwipeLeft = { onSwipeLeft(task) },
                     onViewNotes = { onViewNotes(task) },
@@ -1383,10 +1416,12 @@ private fun TodayList(
 
     if (showAddTodo) {
         AddTodoDialog(
+            members = state.members,
+            currentUserId = state.currentUserId,
             onDismiss = { showAddTodo = false },
-            onConfirm = { text, isPublic ->
+            onConfirm = { text, isPublic, ownerId ->
                 showAddTodo = false
-                onAddTodo(text, isPublic)
+                onAddTodo(text, isPublic, ownerId)
             },
         )
     }
@@ -1500,13 +1535,77 @@ private fun TodoRow(
     }
 }
 
+/** Compact picker for reassigning a chore to another household member.
+ *  Tapping a Today-tab task row opens this — it's the "I can't do this today,
+ *  you do it" affordance. The new assignee gets a push notification when the
+ *  chore is due today. */
+@Composable
+private fun ReassignTaskDialog(
+    task: Task,
+    members: List<Member>,
+    onDismiss: () -> Unit,
+    onConfirm: (newAssignee: String?) -> Unit,
+) {
+    AlertDialog(
+        modifier = Modifier.testTag("reassignTaskDialog:${task.name}"),
+        onDismissRequest = onDismiss,
+        title = { Text("Assign \"${task.name}\"") },
+        text = {
+            Column {
+                members.forEach { member ->
+                    val selected = member.id == task.assignedTo
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm(member.id) }
+                            .padding(vertical = 10.dp, horizontal = 4.dp)
+                            .testTag("reassignOption:${member.displayName}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AvatarBadge(
+                            userId = member.id,
+                            avatarVersion = member.avatarVersion,
+                            fallbackText = member.displayName.take(1).uppercase(),
+                            size = 28,
+                        )
+                        Spacer(Modifier.size(12.dp))
+                        Text(
+                            member.displayName,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (selected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Currently assigned",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddTodoDialog(
+    members: List<Member>,
+    currentUserId: String?,
     onDismiss: () -> Unit,
-    onConfirm: (String, Boolean) -> Unit,
+    onConfirm: (text: String, isPublic: Boolean, ownerId: String?) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
     var isPublic by remember { mutableStateOf(false) }
+    val initialOwner = members.firstOrNull { it.id == currentUserId } ?: members.firstOrNull()
+    var owner by remember { mutableStateOf(initialOwner) }
+    var ownerExpanded by remember { mutableStateOf(false) }
+    val canPickOwner = members.size > 1
     AlertDialog(
         modifier = Modifier.testTag("addTodoDialog"),
         onDismissRequest = onDismiss,
@@ -1520,6 +1619,38 @@ private fun AddTodoDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("todoTextField"),
                 )
+                if (canPickOwner) {
+                    ExposedDropdownMenuBox(
+                        expanded = ownerExpanded,
+                        onExpandedChange = { ownerExpanded = it },
+                        modifier = Modifier.testTag("todoOwnerPicker"),
+                    ) {
+                        OutlinedTextField(
+                            value = if (owner?.id == currentUserId) "Me" else owner?.displayName.orEmpty(),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Assign to") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(ownerExpanded) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = ownerExpanded,
+                            onDismissRequest = { ownerExpanded = false },
+                        ) {
+                            members.forEach { member ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(if (member.id == currentUserId) "Me" else member.displayName)
+                                    },
+                                    onClick = { owner = member; ownerExpanded = false },
+                                    modifier = Modifier.testTag("todoOwnerOption:${member.displayName}"),
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Public", style = MaterialTheme.typography.bodyMedium)
@@ -1541,7 +1672,10 @@ private fun AddTodoDialog(
             TextButton(
                 enabled = text.isNotBlank(),
                 modifier = Modifier.testTag("todoConfirm"),
-                onClick = { onConfirm(text.trim(), isPublic) },
+                onClick = {
+                    val ownerIdForOther = owner?.id?.takeIf { it != currentUserId }
+                    onConfirm(text.trim(), isPublic, ownerIdForOther)
+                },
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

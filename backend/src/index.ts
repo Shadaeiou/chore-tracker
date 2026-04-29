@@ -769,10 +769,16 @@ app.patch("/api/tasks/:id", async (c) => {
   }>();
 
   const task = await c.env.DB.prepare(
-    `SELECT t.id FROM tasks t
+    `SELECT t.id, t.name, t.assigned_to, t.frequency_days, t.last_done_at,
+            t.snoozed_until, t.on_demand
+       FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
-  ).bind(id, hh).first();
+  ).bind(id, hh).first<{
+    id: string; name: string; assigned_to: string | null;
+    frequency_days: number; last_done_at: number | null;
+    snoozed_until: number | null; on_demand: number;
+  }>();
   if (!task) throw new HTTPException(404);
 
   const sets: string[] = [];
@@ -787,20 +793,28 @@ app.patch("/api/tasks/:id", async (c) => {
     if (!newArea) throw new HTTPException(400, { message: "areaId is not in this household" });
     sets.push("area_id = ?"); bindings.push(body.areaId);
   }
-  if (body.name !== undefined) { sets.push("name = ?"); bindings.push(body.name); }
-  if (body.frequencyDays !== undefined) {
+  // The kotlinx Android client serializes every default-null field as
+  // explicit null, so use `!= null` (skips both undefined and null) to mean
+  // "leave alone" for required columns. assignedTo and notes are the two
+  // fields where null legitimately means "clear", so they intentionally
+  // round-trip empty-string sentinels: notes uses "" via the editor, and
+  // assignment clearing is handled via a separate flow if ever needed.
+  if (body.name != null) { sets.push("name = ?"); bindings.push(body.name); }
+  if (body.frequencyDays != null) {
     if (body.frequencyDays <= 0) throw new HTTPException(400, { message: "frequencyDays must be positive" });
     sets.push("frequency_days = ?"); bindings.push(body.frequencyDays);
   }
-  if ("assignedTo" in body) { sets.push("assigned_to = ?"); bindings.push(body.assignedTo ?? null); }
-  if (body.autoRotate !== undefined) { sets.push("auto_rotate = ?"); bindings.push(body.autoRotate ? 1 : 0); }
-  if (body.effortPoints !== undefined) { sets.push("effort_points = ?"); bindings.push(body.effortPoints); }
-  if ("notes" in body) {
-    const trimmed = body.notes?.trim();
+  if (body.assignedTo != null) { sets.push("assigned_to = ?"); bindings.push(body.assignedTo); }
+  if (body.autoRotate != null) { sets.push("auto_rotate = ?"); bindings.push(body.autoRotate ? 1 : 0); }
+  if (body.effortPoints != null) { sets.push("effort_points = ?"); bindings.push(body.effortPoints); }
+  if (body.notes != null) {
+    // Empty string is the explicit "clear notes" sentinel sent by the
+    // editor dialog. null means "leave alone".
+    const trimmed = body.notes.trim();
     sets.push("notes = ?");
     bindings.push(trimmed ? trimmed : null);
   }
-  if (body.onDemand !== undefined) { sets.push("on_demand = ?"); bindings.push(body.onDemand ? 1 : 0); }
+  if (body.onDemand != null) { sets.push("on_demand = ?"); bindings.push(body.onDemand ? 1 : 0); }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
 
   bindings.push(id);
@@ -808,6 +822,45 @@ app.patch("/api/tasks/:id", async (c) => {
     `UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`,
   ).bind(...bindings).run();
   await fanOutRefresh(c, hh, sub);
+
+  // If the actor reassigned this chore to someone else and that chore is
+  // due today (or it's an on-demand item now sitting on their plate),
+  // notify the new assignee. Don't notify on assignments due in the
+  // future — those'll surface naturally when they roll into Today.
+  if (c.env.FCM_SERVICE_ACCOUNT && "assignedTo" in body) {
+    const newAssignee = body.assignedTo ?? null;
+    const previousAssignee = task.assigned_to;
+    if (newAssignee && newAssignee !== sub && newAssignee !== previousAssignee) {
+      const isSnoozed = task.snoozed_until != null && task.snoozed_until > Date.now();
+      const onDemand = task.on_demand !== 0;
+      const dueWindowMs = task.frequency_days * 86_400_000;
+      const dueAt = (task.last_done_at ?? 0) + dueWindowMs;
+      const startOfTomorrow = new Date();
+      startOfTomorrow.setHours(24, 0, 0, 0);
+      const dueToday = onDemand || task.last_done_at == null || dueAt < startOfTomorrow.getTime();
+      if (!isSnoozed && dueToday) {
+        const { results: tokenRows } = await c.env.DB.prepare(
+          `SELECT token FROM device_tokens WHERE user_id = ?`,
+        ).bind(newAssignee).all<{ token: string }>();
+        const tokens = tokenRows.map((r) => r.token);
+        if (tokens.length > 0) {
+          const actor = await c.env.DB.prepare(
+            "SELECT display_name FROM users WHERE id = ?",
+          ).bind(sub).first<{ display_name: string }>();
+          c.executionCtx.waitUntil(
+            sendToTokens(
+              tokens,
+              {
+                title: "Chore assigned to you",
+                body: `${actor?.display_name ?? "Someone"} assigned you "${task.name}"`,
+              },
+              c.env,
+            ),
+          );
+        }
+      }
+    }
+  }
   return c.json({ ok: true });
 });
 
@@ -985,19 +1038,50 @@ app.get("/api/todos", async (c) => {
 
 app.post("/api/todos", async (c) => {
   const { sub, hh } = c.get("user");
-  const body = await c.req.json<{ text?: string; isPublic?: boolean }>();
+  const body = await c.req.json<{ text?: string; isPublic?: boolean; ownerId?: string }>();
   const text = body.text?.trim();
   if (!text) throw new HTTPException(400, { message: "text required" });
+  // Default the owner to the creator. If the caller specified another user,
+  // make sure that user is in the same household before letting it through.
+  let ownerId = sub;
+  if (body.ownerId && body.ownerId !== sub) {
+    const target = await c.env.DB.prepare(
+      "SELECT id FROM users WHERE id = ? AND household_id = ?",
+    ).bind(body.ownerId, hh).first();
+    if (!target) throw new HTTPException(400, { message: "ownerId is not in this household" });
+    ownerId = body.ownerId;
+  }
   const id = newId();
   const now = Date.now();
   const isPublic = body.isPublic ? 1 : 0;
   await c.env.DB.prepare(
     `INSERT INTO todos (id, household_id, owner_id, text, is_public, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(id, hh, sub, text, isPublic, now).run();
+  ).bind(id, hh, ownerId, text, isPublic, now).run();
   await fanOutRefresh(c, hh, sub);
+
+  // Notify the assignee whenever someone else creates a todo on their list.
+  if (c.env.FCM_SERVICE_ACCOUNT && ownerId !== sub) {
+    const { results: tokenRows } = await c.env.DB.prepare(
+      "SELECT token FROM device_tokens WHERE user_id = ?",
+    ).bind(ownerId).all<{ token: string }>();
+    const tokens = tokenRows.map((r) => r.token);
+    if (tokens.length > 0) {
+      const actor = await c.env.DB.prepare(
+        "SELECT display_name FROM users WHERE id = ?",
+      ).bind(sub).first<{ display_name: string }>();
+      c.executionCtx.waitUntil(
+        sendToTokens(
+          tokens,
+          { title: "New reminder for you", body: `${actor?.display_name ?? "Someone"}: ${text}` },
+          c.env,
+        ),
+      );
+    }
+  }
+
   return c.json({
-    id, ownerId: sub, text, doneAt: null,
+    id, ownerId, text, doneAt: null,
     isPublic: isPublic !== 0, createdAt: now,
   });
 });

@@ -185,7 +185,11 @@ data class TodoItem(
 )
 
 @Serializable
-data class CreateTodoRequest(val text: String, val isPublic: Boolean = false)
+data class CreateTodoRequest(
+    val text: String,
+    val isPublic: Boolean = false,
+    val ownerId: String? = null,
+)
 
 /** Toggling done state. Always sent with doneAt either set or null. */
 @Serializable

@@ -695,6 +695,36 @@ describe("PATCH /api/tasks/:id", () => {
     expect(t.frequencyDays).toBe(14);
   });
 
+  it("reassigns when only assignedTo is sent (kotlinx-style null fields)", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token, body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Trash", frequencyDays: 1, assignedTo: alice.userId }),
+    })).json()) as { id: string };
+    // Send the exact shape kotlinx with encodeDefaults=true emits.
+    const res = await api(`/api/tasks/${task.id}`, {
+      method: "PATCH", token: alice.token,
+      body: JSON.stringify({
+        name: null, frequencyDays: null, assignedTo: bob.userId,
+        autoRotate: null, effortPoints: null, notes: null, areaId: null, onDemand: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const tasks = (await (await api("/api/tasks", { token: alice.token })).json()) as Array<{
+      id: string; name: string; assignedTo: string;
+    }>;
+    const t = tasks.find((x) => x.id === task.id)!;
+    expect(t.assignedTo).toBe(bob.userId);
+    expect(t.name).toBe("Trash");  // not nulled
+  });
+
   it("updates autoRotate and effortPoints", async () => {
     const { token, taskId } = await seedTask();
     await api(`/api/tasks/${taskId}`, {
@@ -1243,6 +1273,34 @@ describe("/api/todos (à la carte reminders)", () => {
       method: "DELETE", token: bob.token,
     });
     expect(bobDelete.status).toBe(404);
+  });
+
+  it("can create a todo on behalf of another household member", async () => {
+    const alice = await register({ householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ inviteCode: invite.code });
+    const created = await api("/api/todos", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ text: "Take out trash", isPublic: true, ownerId: bob.userId }),
+    });
+    expect(created.status).toBe(200);
+    const todo = (await created.json()) as { ownerId: string };
+    expect(todo.ownerId).toBe(bob.userId);
+    // Bob sees it on his list (and would have had a push fire if FCM was on).
+    const bobView = (await (await api("/api/todos", { token: bob.token })).json()) as Array<{ text: string }>;
+    expect(bobView.map((t) => t.text)).toContain("Take out trash");
+  });
+
+  it("rejects ownerId pointing at someone outside the household", async () => {
+    const alice = await register();
+    const charlie = await register();
+    const res = await api("/api/todos", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ text: "Ghost", ownerId: charlie.userId }),
+    });
+    expect(res.status).toBe(400);
   });
 });
 
