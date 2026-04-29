@@ -92,6 +92,9 @@ interface ChoreApi {
     @POST("api/tasks/{id}/snooze")
     suspend fun snoozeTask(@Path("id") id: String, @Body req: SnoozeRequest)
 
+    @DELETE("api/tasks/{id}/snooze")
+    suspend fun unsnoozeTask(@Path("id") id: String)
+
     @DELETE("api/tasks/{id}/completions/last")
     suspend fun undoLastCompletion(@Path("id") id: String)
 

@@ -753,7 +753,12 @@ fun HomeScreen(
             onSnooze = { until ->
                 snoozingTask = null
                 scope.launch {
-                    runCatching { repo.api.snoozeTask(task.id, SnoozeRequest(until)) }
+                    val result = if (until <= System.currentTimeMillis()) {
+                        runCatching { repo.api.unsnoozeTask(task.id) }
+                    } else {
+                        runCatching { repo.api.snoozeTask(task.id, SnoozeRequest(until)) }
+                    }
+                    result
                         .onSuccess { repo.refresh() }
                         .onFailure { snackbarHost.showSnackbar("Snooze failed: ${it.message}") }
                 }

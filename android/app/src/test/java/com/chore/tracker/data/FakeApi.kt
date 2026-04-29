@@ -130,6 +130,12 @@ class FakeApi : ChoreApi {
         snoozed.add(id to req.until)
         tasks.replaceAll { if (it.id == id) it.copy(snoozedUntil = req.until) else it }
     }
+    val unsnoozed = mutableListOf<String>()
+    override suspend fun unsnoozeTask(id: String) {
+        maybeThrow()
+        unsnoozed.add(id)
+        tasks.replaceAll { if (it.id == id) it.copy(snoozedUntil = null) else it }
+    }
     val undone = mutableListOf<String>()
     override suspend fun undoLastCompletion(id: String) {
         maybeThrow()

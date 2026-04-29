@@ -734,6 +734,21 @@ app.post("/api/tasks/:id/snooze", async (c) => {
   return c.json({ ok: true });
 });
 
+app.delete("/api/tasks/:id/snooze", async (c) => {
+  const { sub, hh } = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await c.env.DB.prepare(
+    `SELECT t.id FROM tasks t
+       JOIN areas a ON a.id = t.area_id
+      WHERE t.id = ? AND a.household_id = ?`,
+  ).bind(taskId, hh).first();
+  if (!task) throw new HTTPException(404);
+  await c.env.DB.prepare("UPDATE tasks SET snoozed_until = NULL WHERE id = ?")
+    .bind(taskId).run();
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
 app.patch("/api/tasks/:id", async (c) => {
   const { sub, hh } = c.get("user");
   const id = c.req.param("id");

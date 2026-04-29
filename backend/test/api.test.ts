@@ -1535,6 +1535,27 @@ describe("POST /api/tasks/:id/snooze", () => {
     }>;
     expect(tasks.find((t) => t.id === taskId)?.snoozedUntil).toBeNull();
   });
+
+  it("DELETE /api/tasks/:id/snooze unsnoozes a snoozed task", async () => {
+    const { token, taskId } = await seedTask();
+    await api(`/api/tasks/${taskId}/snooze`, {
+      method: "POST", token,
+      body: JSON.stringify({ until: Date.now() + 86_400_000 }),
+    });
+    const res = await api(`/api/tasks/${taskId}/snooze`, { method: "DELETE", token });
+    expect(res.status).toBe(200);
+    const tasks = (await (await api("/api/tasks", { token })).json()) as Array<{
+      id: string; snoozedUntil: number | null;
+    }>;
+    expect(tasks.find((t) => t.id === taskId)?.snoozedUntil).toBeNull();
+  });
+
+  it("DELETE /api/tasks/:id/snooze 404s for cross-household", async () => {
+    const { taskId } = await seedTask();
+    const bob = await register();
+    const res = await api(`/api/tasks/${taskId}/snooze`, { method: "DELETE", token: bob.token });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("GET /api/task-templates", () => {
