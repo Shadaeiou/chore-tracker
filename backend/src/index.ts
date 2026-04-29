@@ -489,6 +489,7 @@ app.get("/api/tasks", async (c) => {
             t.effort_points  AS effortPoints,
             t.snoozed_until  AS snoozedUntil,
             t.on_demand      AS onDemand,
+            t.postpone_anchor AS postponeAnchor,
             t.notes          AS notes,
             u.display_name   AS lastDoneBy,
             ua.display_name  AS assignedToName
@@ -639,12 +640,17 @@ app.post("/api/tasks/:id/complete", async (c) => {
     .catch(() => ({} as { at?: number; notes?: string; completedBy?: string }));
 
   const task = await c.env.DB.prepare(
-    `SELECT t.id, t.name, t.auto_rotate, t.assigned_to, t.created_at FROM tasks t
+    `SELECT t.id, t.name, t.auto_rotate, t.assigned_to, t.created_at, t.postpone_anchor
+       FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
   )
     .bind(taskId, hh)
-    .first<{ id: string; name: string; auto_rotate: number; assigned_to: string | null; created_at: number }>();
+    .first<{
+      id: string; name: string; auto_rotate: number;
+      assigned_to: string | null; created_at: number;
+      postpone_anchor: number | null;
+    }>();
   if (!task) throw new HTTPException(404);
 
   // If completedBy is provided, verify it's a member of the same household.
@@ -670,13 +676,28 @@ app.post("/api/tasks/:id/complete", async (c) => {
     c.env.DB.prepare(
       "INSERT INTO completions (id, task_id, user_id, done_at, notes) VALUES (?, ?, ?, ?, ?)",
     ).bind(completionId, taskId, completedBy, completedAt, completionNotes),
-    // last_done_at uses MAX so an older retroactive completion doesn't overwrite a newer one.
-    c.env.DB.prepare(
-      `UPDATE tasks SET last_done_at = (
-         SELECT MAX(done_at) FROM completions WHERE task_id = ?
-       ), snoozed_until = NULL WHERE id = ?`,
-    ).bind(taskId, taskId),
   ];
+  if (task.postpone_anchor != null) {
+    // The user snoozed this chore (e.g. trash a day late); honor the original
+    // schedule by stamping last_done_at to the captured anchor instead of the
+    // actual completion time. Activity feed still shows the truthful done_at.
+    stmts.push(
+      c.env.DB.prepare(
+        `UPDATE tasks SET last_done_at = ?, snoozed_until = NULL,
+                          postpone_anchor = NULL WHERE id = ?`,
+      ).bind(task.postpone_anchor, taskId),
+    );
+  } else {
+    // Normal path: last_done_at uses MAX so an older retroactive completion
+    // doesn't overwrite a newer one.
+    stmts.push(
+      c.env.DB.prepare(
+        `UPDATE tasks SET last_done_at = (
+           SELECT MAX(done_at) FROM completions WHERE task_id = ?
+         ), snoozed_until = NULL WHERE id = ?`,
+      ).bind(taskId, taskId),
+    );
+  }
 
   if (task.auto_rotate) {
     const { results: members } = await c.env.DB.prepare(
@@ -726,15 +747,30 @@ app.post("/api/tasks/:id/snooze", async (c) => {
   if (!body.until || body.until <= Date.now())
     throw new HTTPException(400, { message: "until must be a future timestamp" });
 
+  // Pull the fields needed to compute the original due (so completing a
+  // snoozed chore later doesn't permanently shift its cadence).
   const task = await c.env.DB.prepare(
-    `SELECT t.id FROM tasks t
+    `SELECT t.id, t.last_done_at, t.frequency_days, t.on_demand, t.postpone_anchor
+       FROM tasks t
        JOIN areas a ON a.id = t.area_id
       WHERE t.id = ? AND a.household_id = ?`,
-  ).bind(taskId, hh).first();
+  ).bind(taskId, hh).first<{
+    id: string; last_done_at: number | null; frequency_days: number;
+    on_demand: number; postpone_anchor: number | null;
+  }>();
   if (!task) throw new HTTPException(404);
 
-  await c.env.DB.prepare("UPDATE tasks SET snoozed_until = ? WHERE id = ?")
-    .bind(body.until, taskId).run();
+  // Capture the schedule anchor on the first snooze of an in-cadence chore.
+  // On-demand chores have no cadence to preserve; tasks with a stale anchor
+  // from a previous snooze keep that anchor (the original due hasn't moved).
+  let postponeAnchor: number | null = task.postpone_anchor;
+  if (postponeAnchor == null && task.on_demand === 0 && task.last_done_at != null) {
+    postponeAnchor = task.last_done_at + task.frequency_days * 86_400_000;
+  }
+
+  await c.env.DB.prepare(
+    "UPDATE tasks SET snoozed_until = ?, postpone_anchor = ? WHERE id = ?",
+  ).bind(body.until, postponeAnchor, taskId).run();
   await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });
@@ -748,8 +784,11 @@ app.delete("/api/tasks/:id/snooze", async (c) => {
       WHERE t.id = ? AND a.household_id = ?`,
   ).bind(taskId, hh).first();
   if (!task) throw new HTTPException(404);
-  await c.env.DB.prepare("UPDATE tasks SET snoozed_until = NULL WHERE id = ?")
-    .bind(taskId).run();
+  // Unsnooze cancels the postponement entirely — schedule reverts to
+  // last_done_at + frequency.
+  await c.env.DB.prepare(
+    "UPDATE tasks SET snoozed_until = NULL, postpone_anchor = NULL WHERE id = ?",
+  ).bind(taskId).run();
   await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });

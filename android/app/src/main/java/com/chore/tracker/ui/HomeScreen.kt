@@ -2415,11 +2415,12 @@ private fun SnoozeOrDeleteDialog(
                 val daysLeft = ((task.snoozedUntil!! - now) / 86_400_000L).coerceAtLeast(0)
                 Text(
                     "Snoozed for $daysLeft day${if (daysLeft == 1L) "" else "s"} more. " +
-                        "Tap unsnooze to bring it back now.",
+                        "When you complete it, the schedule stays on its " +
+                        "original cadence. Tap unsnooze to bring it back now.",
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Snooze for")
+                    Text("Snooze for (won't shift the recurring schedule)")
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

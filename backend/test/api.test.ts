@@ -1618,6 +1618,43 @@ describe("POST /api/tasks/:id/snooze", () => {
     expect(tasks.find((t) => t.id === taskId)?.snoozedUntil).toBeNull();
   });
 
+  it("snooze + complete preserves the original cadence (postpone_anchor)", async () => {
+    const auth = await register();
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: auth.token, body: JSON.stringify({ name: "Curb" }),
+    })).json()) as { id: string };
+    // Seed a 7-day task last done a week ago, so its current due is roughly now.
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({
+        areaId: area.id, name: "Trash", frequencyDays: 7, lastDoneAt: weekAgo,
+      }),
+    })).json()) as { id: string };
+    // Snooze a day (holiday pickup).
+    await api(`/api/tasks/${task.id}/snooze`, {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ until: Date.now() + 86_400_000 }),
+    });
+    // Server stamps postpone_anchor = weekAgo + 7d (original due).
+    // Complete the next day, with the actual completion timestamp.
+    const completionTime = Date.now() + 86_400_000 + 3_600_000;
+    await api(`/api/tasks/${task.id}/complete`, {
+      method: "POST", token: auth.token,
+      body: JSON.stringify({ at: completionTime }),
+    });
+    const tasks = (await (await api("/api/tasks", { token: auth.token })).json()) as Array<{
+      id: string; lastDoneAt: number; snoozedUntil: number | null; postponeAnchor: number | null;
+    }>;
+    const t = tasks.find((x) => x.id === task.id)!;
+    // last_done_at anchored to original due, NOT actual completion → next due
+    // = weekAgo + 14d (one week from original Thursday), not completionTime + 7d.
+    const expectedAnchor = weekAgo + 7 * 86_400_000;
+    expect(t.lastDoneAt).toBe(expectedAnchor);
+    expect(t.snoozedUntil).toBeNull();
+    expect(t.postponeAnchor).toBeNull();
+  });
+
   it("DELETE /api/tasks/:id/snooze 404s for cross-household", async () => {
     const { taskId } = await seedTask();
     const bob = await register();

@@ -14,6 +14,13 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.43",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Snoozing a chore now keeps its recurring schedule on track. If trash is normally Thursday and you snooze a day for a holiday pickup, completing it on Friday still anchors the next due to the following Thursday rather than shifting to a Friday cadence forever.",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.42",
         date = "2026-04-29",
         bullets = listOf(

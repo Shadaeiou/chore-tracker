@@ -50,6 +50,10 @@ data class Task(
     val dueness: Double? = null,
     val notes: String? = null,
     val onDemand: Boolean = false,
+    /** Captured original due (last_done_at + freq) when the chore was snoozed,
+     *  so the next completion stamps last_done_at to this anchor instead of
+     *  the real completion time — keeps weekly cadence on track. */
+    val postponeAnchor: Long? = null,
 )
 
 @Serializable
