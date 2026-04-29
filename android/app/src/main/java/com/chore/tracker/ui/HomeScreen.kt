@@ -227,8 +227,17 @@ fun HomeScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     // Apply pending-delete filtering once. Anything mid-undo is hidden from
     // the UI but not yet removed on the server.
-    val visibleAreas = remember(state.areas, pendingDeletedAreaIds) {
-        state.areas.filter { it.id !in pendingDeletedAreaIds }
+    // Sort areas by the per-device order (set on this device by drag-reorder).
+    // Areas not in the saved order — newly-added ones, or fresh installs —
+    // fall to the end in createdAt order.
+    val visibleAreas = remember(state.areas, pendingDeletedAreaIds, areaOrder) {
+        val orderIndex = areaOrder.withIndex().associate { (i, id) -> id to i }
+        state.areas
+            .filter { it.id !in pendingDeletedAreaIds }
+            .sortedWith(compareBy(
+                { orderIndex[it.id] ?: Int.MAX_VALUE },
+                { it.createdAt },
+            ))
     }
     val visibleTasks = remember(state.tasks, pendingDeletedTaskIds, pendingDeletedAreaIds) {
         state.tasks.filter {
@@ -241,6 +250,7 @@ fun HomeScreen(
     val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
     val autoUpdate by repo.session.autoUpdateFlow.collectAsState(initial = false)
     val collapsedAreaIds by repo.session.collapsedAreaIdsFlow.collectAsState(initial = emptySet())
+    val areaOrder by repo.session.areaOrderFlow.collectAsState(initial = emptyList())
     var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
 
@@ -429,21 +439,10 @@ fun HomeScreen(
                                     else selectedAreaIds + id
                                 },
                                 onCommitReorder = { newOrder ->
+                                    // Per-device only — each member can lay out areas
+                                    // however they like without nudging other devices.
                                     scope.launch {
-                                        var failures = 0
-                                        newOrder.forEachIndexed { idx, area ->
-                                            if (area.sortOrder != idx) {
-                                                runCatching {
-                                                    repo.api.patchArea(area.id, PatchAreaRequest(sortOrder = idx))
-                                                }.onFailure { failures++ }
-                                            }
-                                        }
-                                        repo.refresh()
-                                        if (failures > 0) {
-                                            snackbarHost.showSnackbar(
-                                                "$failures of ${newOrder.size} order updates failed",
-                                            )
-                                        }
+                                        repo.session.setAreaOrder(newOrder.map { it.id })
                                     }
                                 },
                             )
@@ -1067,7 +1066,9 @@ private fun HouseholdHeader(
 /** Edit-areas mode: hand-rolled drag-reorder over a non-lazy Column.
  *  Households are small (typically <20 areas) so no LazyColumn needed.
  *  Eagerly mutates the in-memory list when the dragged row crosses a row
- *  boundary, then commits the new sortOrders on drop. */
+ *  boundary, then writes the new order to per-device DataStore on drop —
+ *  reordering is intentionally local so each member can lay out areas
+ *  however they like. */
 @Composable
 private fun ReorderableAreaList(
     areas: List<Area>,

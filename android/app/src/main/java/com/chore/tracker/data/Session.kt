@@ -34,6 +34,10 @@ interface Session {
     val autoUpdateFlow: Flow<Boolean>
     /** Set of area ids currently collapsed on the household tab. Default empty (= all expanded). */
     val collapsedAreaIdsFlow: Flow<Set<String>>
+    /** Per-device area ordering. List of area ids; areas not in the list fall
+     *  to the end in createdAt order. Each household member maintains their
+     *  own order — reorder is intentionally not synced to the backend. */
+    val areaOrderFlow: Flow<List<String>>
     suspend fun token(): String?
     suspend fun setToken(value: String?)
     suspend fun setThemeMode(mode: ThemeMode)
@@ -42,6 +46,7 @@ interface Session {
     suspend fun setStatusColor(key: StatusKey, hex: String)
     suspend fun setAutoUpdate(enabled: Boolean)
     suspend fun setAreaCollapsed(areaId: String, collapsed: Boolean)
+    suspend fun setAreaOrder(orderedIds: List<String>)
     suspend fun fcmToken(): String?
     suspend fun setFcmToken(value: String?)
 }
@@ -61,6 +66,7 @@ class DataStoreSession(private val context: Context) : Session {
     private val statusNotDueColorKey = stringPreferencesKey("status_not_due_color")
     private val autoUpdateKey = stringPreferencesKey("auto_update_enabled")
     private val collapsedAreasKey = stringPreferencesKey("collapsed_area_ids")
+    private val areaOrderKey = stringPreferencesKey("area_order_ids")
 
     override val tokenFlow: Flow<String?> =
         context.dataStore.data.map { it[tokenKey] }
@@ -89,6 +95,13 @@ class DataStoreSession(private val context: Context) : Session {
                 .split(',')
                 .filter { it.isNotBlank() }
                 .toSet()
+        }
+
+    override val areaOrderFlow: Flow<List<String>> =
+        context.dataStore.data.map { prefs ->
+            prefs[areaOrderKey].orEmpty()
+                .split(',')
+                .filter { it.isNotBlank() }
         }
 
     override val statusIndicatorsFlow: Flow<StatusIndicators> =
@@ -157,6 +170,13 @@ class DataStoreSession(private val context: Context) : Session {
         }
     }
 
+    override suspend fun setAreaOrder(orderedIds: List<String>) {
+        context.dataStore.edit { prefs ->
+            if (orderedIds.isEmpty()) prefs.remove(areaOrderKey)
+            else prefs[areaOrderKey] = orderedIds.joinToString(",")
+        }
+    }
+
     override suspend fun fcmToken(): String? =
         context.dataStore.data.map { it[fcmKey] }.first()
 
@@ -178,12 +198,14 @@ class InMemorySession(
     private val indicatorsState = MutableStateFlow(StatusIndicators())
     private val autoUpdateState = MutableStateFlow(false)
     private val collapsedAreasState = MutableStateFlow(emptySet<String>())
+    private val areaOrderState = MutableStateFlow(emptyList<String>())
     override val tokenFlow: Flow<String?> = tokenState
     override val themeModeFlow: Flow<ThemeMode> = themeState
     override val themePaletteFlow: Flow<ThemePalette> = paletteState
     override val statusIndicatorsFlow: Flow<StatusIndicators> = indicatorsState
     override val autoUpdateFlow: Flow<Boolean> = autoUpdateState
     override val collapsedAreaIdsFlow: Flow<Set<String>> = collapsedAreasState
+    override val areaOrderFlow: Flow<List<String>> = areaOrderState
     override suspend fun token(): String? = tokenState.value
     override suspend fun setToken(value: String?) { tokenState.value = value }
     override suspend fun setThemeMode(mode: ThemeMode) { themeState.value = mode }
@@ -207,6 +229,7 @@ class InMemorySession(
         collapsedAreasState.value = if (collapsed) collapsedAreasState.value + areaId
         else collapsedAreasState.value - areaId
     }
+    override suspend fun setAreaOrder(orderedIds: List<String>) { areaOrderState.value = orderedIds }
     private var _fcmToken: String? = null
     override suspend fun fcmToken() = _fcmToken
     override suspend fun setFcmToken(value: String?) { _fcmToken = value }

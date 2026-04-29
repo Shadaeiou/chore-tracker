@@ -14,6 +14,13 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.41",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Area ordering is now per-device — each housemate can lay out their list however they like without affecting anyone else",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.40",
         date = "2026-04-29",
         bullets = listOf(
