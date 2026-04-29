@@ -1249,51 +1249,65 @@ private fun TodayList(
     // to the current user or unassigned. Snoozed and paused tasks are hidden
     // (paused household → empty list, banner explains why).
     val me = state.currentUserId
-    val visibleTasks = remember(state.tasks, state.pausedUntil, me) {
-        if (state.pausedUntil != null && state.pausedUntil > now) return@remember emptyList()
-        state.tasks
-            .filter { it.snoozedUntil == null || it.snoozedUntil <= now }
-            .filter { task -> task.assignedTo == null || task.assignedTo == me }
-            .filter { task ->
-                if (task.onDemand) {
-                    // On-demand tasks have no schedule — show only when explicitly
-                    // assigned to me (i.e. it's my turn).
-                    task.assignedTo == me
-                } else {
-                    val due = (task.lastDoneAt ?: 0L) +
-                        task.frequencyDays.toLong() * 86_400_000L
-                    task.lastDoneAt == null || due < startOfTomorrow
-                }
-            }
-            .sortedByDescending { it.dirtiness(now) }
-    }
     val areaNamesById = remember(state.areas) { state.areas.associate { it.id to it.name } }
     val avatarVersionByUser = remember(state.members) {
         state.members.associate { it.id to it.avatarVersion }
     }
 
     val startOfToday = startOfTomorrow - 86_400_000L
-    // Visible todos: every open one, plus done ones still inside today's window.
+
+    fun isDueToday(task: Task): Boolean {
+        if (task.snoozedUntil != null && task.snoozedUntil > now) return false
+        if (task.onDemand) return true   // on-demand always shows for the assignee
+        val due = (task.lastDoneAt ?: 0L) + task.frequencyDays.toLong() * 86_400_000L
+        return task.lastDoneAt == null || due < startOfTomorrow
+    }
+
+    val onPaused = state.pausedUntil != null && state.pausedUntil > now
+
+    val myChores = remember(state.tasks, onPaused, me) {
+        if (onPaused) emptyList()
+        else state.tasks
+            .filter { task -> task.assignedTo == null || task.assignedTo == me }
+            .filter(::isDueToday)
+            .filter { task ->
+                // On-demand tasks only show for the explicit assignee, not unassigned.
+                if (task.onDemand) task.assignedTo == me else true
+            }
+            .sortedByDescending { it.dirtiness(now) }
+    }
     val myTodos = remember(state.todos, me, startOfToday) {
         state.todos.filter { it.ownerId == me && (it.doneAt == null || it.doneAt >= startOfToday) }
     }
-    val othersTodosByOwner = remember(state.todos, me, startOfToday) {
-        state.todos
-            .filter { it.ownerId != me && it.isPublic && (it.doneAt == null || it.doneAt >= startOfToday) }
-            .groupBy { it.ownerId }
+    // Per-other-member section: their chores due today + their public open todos.
+    // Skip members with nothing on their plate so the page doesn't fill with empty headers.
+    val otherSections = remember(state.tasks, state.todos, state.members, onPaused, me, startOfToday) {
+        if (onPaused) emptyList()
+        else state.members
+            .filter { it.id != me }
+            .mapNotNull { member ->
+                val theirChores = state.tasks
+                    .filter { it.assignedTo == member.id }
+                    .filter(::isDueToday)
+                    .sortedByDescending { it.dirtiness(now) }
+                val theirTodos = state.todos.filter {
+                    it.ownerId == member.id && it.isPublic &&
+                        (it.doneAt == null || it.doneAt >= startOfToday)
+                }
+                if (theirChores.isEmpty() && theirTodos.isEmpty()) null
+                else Triple(member, theirChores, theirTodos)
+            }
     }
-    val membersById = remember(state.members) { state.members.associateBy { it.id } }
 
     var showAddTodo by remember { mutableStateOf(false) }
-    val onPaused = state.pausedUntil != null && state.pausedUntil > now
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp).testTag("todayList"),
     ) {
-        // ── Reminders section ────────────────────────────────────────────
-        item("remindersHeader") {
+        // ── Your today ───────────────────────────────────────────────────
+        item("yourHeader") {
             ReminderSectionHeader(
-                title = "Your reminders",
+                title = "Your today",
                 onAdd = { showAddTodo = true },
             )
         }
@@ -1307,57 +1321,54 @@ private fun TodayList(
                 onDelete = { onDeleteTodo(todo) },
             )
         }
-        if (myTodos.isEmpty()) {
-            item("noMyTodos") {
-                Text(
-                    "Tap + to add a one-off reminder.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-        }
-        othersTodosByOwner.forEach { (ownerId, list) ->
-            val ownerName = membersById[ownerId]?.displayName ?: "Member"
-            item("ownerHeader-$ownerId") {
-                ReminderSectionHeader(title = "$ownerName's reminders", onAdd = null)
-            }
-            items(list, key = { "todo-${it.id}" }) { todo ->
-                TodoRow(
-                    todo = todo,
-                    showOwner = false,
-                    ownerName = ownerName,
-                    canEdit = false,
-                    onToggle = {},
-                    onDelete = {},
-                )
-            }
-        }
-
-        // ── Chores section ───────────────────────────────────────────────
-        item("choresHeader") {
-            Text(
-                "Today's chores",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            )
-        }
-        if (visibleTasks.isEmpty()) {
-            item("noChores") {
+        if (myChores.isEmpty() && myTodos.isEmpty()) {
+            item("noMine") {
                 Text(
                     if (onPaused) "Vacation mode — nothing's due."
-                    else "Nothing due today 🎉",
+                    else "Nothing due today 🎉  Tap + to add a reminder.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
         } else {
-            items(visibleTasks, key = { it.id }) { task ->
+            items(myChores, key = { "task-${it.id}" }) { task ->
                 TaskRow(
                     task = task,
                     areaName = areaNamesById[task.areaId],
                     indicators = indicators,
                     onTap = null,  // Today is read-only triage; edit lives on Household
+                    onSwipeRight = { onSwipeRight(task) },
+                    onSwipeLeft = { onSwipeLeft(task) },
+                    onViewNotes = { onViewNotes(task) },
+                    assigneeAvatarVersion = avatarVersionByUser[task.assignedTo] ?: 0,
+                )
+            }
+        }
+
+        // ── Other members' today ─────────────────────────────────────────
+        otherSections.forEach { (member, theirChores, theirTodos) ->
+            item("memberHeader-${member.id}") {
+                MemberSectionHeader(
+                    member = member,
+                    title = "${member.displayName}'s today",
+                )
+            }
+            items(theirTodos, key = { "todo-${it.id}" }) { todo ->
+                TodoRow(
+                    todo = todo,
+                    showOwner = false,
+                    ownerName = member.displayName,
+                    canEdit = false,
+                    onToggle = {},
+                    onDelete = {},
+                )
+            }
+            items(theirChores, key = { "task-${it.id}" }) { task ->
+                TaskRow(
+                    task = task,
+                    areaName = areaNamesById[task.areaId],
+                    indicators = indicators,
+                    onTap = null,
                     onSwipeRight = { onSwipeRight(task) },
                     onSwipeLeft = { onSwipeLeft(task) },
                     onViewNotes = { onViewNotes(task) },
@@ -1374,6 +1385,32 @@ private fun TodayList(
                 showAddTodo = false
                 onAddTodo(text, isPublic)
             },
+        )
+    }
+}
+
+@Composable
+private fun MemberSectionHeader(
+    member: Member,
+    title: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .testTag("memberSection:${member.displayName}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AvatarBadge(
+            userId = member.id,
+            avatarVersion = member.avatarVersion,
+            fallbackText = member.displayName.take(1).uppercase(),
+            size = 24,
+        )
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
         )
     }
 }
