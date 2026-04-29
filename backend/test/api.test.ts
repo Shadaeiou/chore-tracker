@@ -544,10 +544,20 @@ describe("PATCH /api/areas/:id", () => {
       method: "POST", token: auth.token,
       body: JSON.stringify({ name: "Living Room" }),
     })).json()) as { id: string };
-    // Reorder: Bathroom, Living Room, Kitchen
-    await api(`/api/areas/${b.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 0 }) });
-    await api(`/api/areas/${c.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 1 }) });
-    await api(`/api/areas/${a.id}`, { method: "PATCH", token: auth.token, body: JSON.stringify({ sortOrder: 2 }) });
+    // Reorder: Bathroom, Living Room, Kitchen.
+    // Send each PATCH the way the kotlinx Android client serializes it
+    // (encodeDefaults=true → unset fields ride along as nulls). The endpoint
+    // must treat null as "leave alone" or this batch will fail on the
+    // NOT NULL name / sort_order columns.
+    const responses = await Promise.all([
+      api(`/api/areas/${b.id}`, { method: "PATCH", token: auth.token,
+        body: JSON.stringify({ name: null, icon: null, sortOrder: 0 }) }),
+      api(`/api/areas/${c.id}`, { method: "PATCH", token: auth.token,
+        body: JSON.stringify({ name: null, icon: null, sortOrder: 1 }) }),
+      api(`/api/areas/${a.id}`, { method: "PATCH", token: auth.token,
+        body: JSON.stringify({ name: null, icon: null, sortOrder: 2 }) }),
+    ]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
     const areas = (await (await api("/api/areas", { token: auth.token })).json()) as Array<{ id: string; name: string; sortOrder: number }>;
     expect(areas.map((x) => x.name)).toEqual(["Bathroom", "Living Room", "Kitchen"]);
     expect(areas.map((x) => x.sortOrder)).toEqual([0, 1, 2]);

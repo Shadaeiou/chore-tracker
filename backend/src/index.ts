@@ -387,9 +387,14 @@ app.patch("/api/areas/:id", async (c) => {
 
   const sets: string[] = [];
   const bindings: unknown[] = [];
-  if (body.name !== undefined) { sets.push("name = ?"); bindings.push(body.name); }
-  if ("icon" in body) { sets.push("icon = ?"); bindings.push(body.icon ?? null); }
-  if (body.sortOrder !== undefined) { sets.push("sort_order = ?"); bindings.push(body.sortOrder); }
+  // Use `!= null` (catches both undefined and null) so the kotlinx Android
+  // client's `encodeDefaults = true` default doesn't accidentally clear or
+  // overwrite columns. Area icon is nullable but we don't expose a "clear
+  // icon" path through this endpoint — pass non-null to set, omit/null to
+  // leave alone.
+  if (body.name != null) { sets.push("name = ?"); bindings.push(body.name); }
+  if (body.icon != null) { sets.push("icon = ?"); bindings.push(body.icon); }
+  if (body.sortOrder != null) { sets.push("sort_order = ?"); bindings.push(body.sortOrder); }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
 
   bindings.push(id);

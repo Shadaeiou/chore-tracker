@@ -975,7 +975,10 @@ private fun HouseholdHeader(
                 modifier = Modifier.testTag("massDeleteAreasButton"),
                 onClick = onConfirmDeleteSelected,
             ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            TextButton(onClick = onCancelSelection) { Text("Cancel") }
+            TextButton(
+                modifier = Modifier.testTag("areaEditDone"),
+                onClick = onCancelSelection,
+            ) { Text("Done") }
         }
         return
     }
