@@ -227,6 +227,7 @@ fun HomeScreen(
         }
     }
     var selectedTab by remember { mutableIntStateOf(0) }
+    val areaOrder by repo.session.areaOrderFlow.collectAsState(initial = emptyList())
     // Apply pending-delete filtering once. Anything mid-undo is hidden from
     // the UI but not yet removed on the server.
     // Sort areas by the per-device order (set on this device by drag-reorder).
@@ -256,7 +257,6 @@ fun HomeScreen(
     val statusIndicators by repo.session.statusIndicatorsFlow.collectAsState(initial = StatusIndicators())
     val autoUpdate by repo.session.autoUpdateFlow.collectAsState(initial = false)
     val collapsedAreaIds by repo.session.collapsedAreaIdsFlow.collectAsState(initial = emptySet())
-    val areaOrder by repo.session.areaOrderFlow.collectAsState(initial = emptyList())
     var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
 
