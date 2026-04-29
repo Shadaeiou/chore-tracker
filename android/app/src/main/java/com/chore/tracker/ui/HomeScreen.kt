@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Loop
@@ -1083,7 +1085,7 @@ private fun ReorderableAreaList(
     }
     var draggingId by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    val rowHeightPx = with(LocalDensity.current) { 80.dp.toPx() }
+    val rowHeightPx = with(LocalDensity.current) { 56.dp.toPx() }
 
     Column(
         modifier = Modifier
@@ -1134,9 +1136,23 @@ private fun ReorderableAreaList(
                             dragOffsetY = 0f
                             onCommitReorder(toCommit)
                         },
+                        onSendToTop = {
+                            val idx = working.indexOfFirst { it.id == area.id }
+                            if (idx > 0) {
+                                working = working.toMutableList().apply { add(0, removeAt(idx)) }
+                                onCommitReorder(working)
+                            }
+                        },
+                        onSendToBottom = {
+                            val idx = working.indexOfFirst { it.id == area.id }
+                            if (idx < working.lastIndex) {
+                                working = working.toMutableList().apply { add(removeAt(idx)) }
+                                onCommitReorder(working)
+                            }
+                        },
                     )
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
             }
         }
     }
@@ -1152,6 +1168,8 @@ private fun SelectableAreaCard(
     onDragStart: () -> Unit = {},
     onDrag: (Float) -> Unit = {},
     onDragEnd: () -> Unit = {},
+    onSendToTop: () -> Unit = {},
+    onSendToBottom: () -> Unit = {},
 ) {
     Card(
         modifier = Modifier
@@ -1168,14 +1186,14 @@ private fun SelectableAreaCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 Icons.Default.DragHandle,
                 contentDescription = "Drag to reorder",
                 modifier = Modifier
-                    .padding(end = 8.dp)
+                    .padding(end = 4.dp)
                     .testTag("areaDragHandle:${area.name}")
                     .pointerInput(area.id) {
                         detectDragGestures(
@@ -1193,12 +1211,32 @@ private fun SelectableAreaCard(
                 onCheckedChange = { onToggle() },
                 modifier = Modifier.testTag("selectableAreaCheckbox:${area.name}"),
             )
-            Column(Modifier.weight(1f)) {
-                Text(area.name, style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(area.name, style = MaterialTheme.typography.bodyLarge)
                 Text(
                     if (taskCount == 1) "1 task" else "$taskCount tasks",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(
+                onClick = onSendToTop,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Send to top",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(
+                onClick = onSendToBottom,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Send to bottom",
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
         }
