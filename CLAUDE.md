@@ -22,9 +22,10 @@ App name + logo deliberately deferred (still "Chore Tracker", no logo). User use
 - **Tone:** terse. He skim-reads — front-load the answer, no preambles, no trailing recaps. He'll redirect if he wants more.
 - **Action vs. ask:**
   - Local file edits, tests, typechecks — just do them.
-  - Pushing to remote, deploying, deleting branches, rotating secrets, anything destructive or visible to others — confirm first.
+  - **Commit and push to `main` automatically when done coding — no need to ask.**
+  - Deleting branches, rotating secrets, anything else destructive or irreversible — confirm first.
   - Auto mode (when active) means "execute autonomously, course-correct as you go" — but destructive actions still need confirmation.
-- **Workflow:** trunk-based on `main`. No PRs. Push directly to `main` once tests pass locally; let CI verify. The deleted `claude/cloudflare-backend-deployment-6u9lj` branch was a one-time scaffold, not a permanent pattern.
+- **Workflow:** trunk-based on `main`. **Always work on `main` unless explicitly told otherwise.** No PRs. Push directly to `main` once tests pass locally; let CI verify. The deleted `claude/cloudflare-backend-deployment-6u9lj` branch was a one-time scaffold, not a permanent pattern.
 
 ## Stack at a glance
 
