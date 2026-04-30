@@ -1164,6 +1164,30 @@ app.post("/api/completions/:id/reactions", async (c) => {
     ).bind(completionId, sub, emoji, Date.now()).run();
   }
   await fanOutRefresh(c, hh, sub);
+
+  // Push to the original completer when someone else adds a reaction. Skip
+  // self-reactions and clears (the unreact case) to keep noise down.
+  if (emoji && c.env.FCM_SERVICE_ACCOUNT && completion.user_id !== sub) {
+    const { results: tokenRows } = await c.env.DB.prepare(
+      "SELECT token FROM device_tokens WHERE user_id = ?",
+    ).bind(completion.user_id).all<{ token: string }>();
+    const tokens = tokenRows.map((r) => r.token);
+    if (tokens.length > 0) {
+      const actor = await c.env.DB.prepare(
+        "SELECT display_name FROM users WHERE id = ?",
+      ).bind(sub).first<{ display_name: string }>();
+      c.executionCtx.waitUntil(
+        sendToTokens(
+          tokens,
+          {
+            title: `${actor?.display_name ?? "Someone"} reacted ${emoji}`,
+            body: `to "${completion.task_name}"`,
+          },
+          c.env,
+        ),
+      );
+    }
+  }
   return c.json({ ok: true });
 });
 
