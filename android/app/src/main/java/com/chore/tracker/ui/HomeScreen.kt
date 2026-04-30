@@ -530,6 +530,7 @@ fun HomeScreen(
                     activity = state.activity,
                     workload = state.workload,
                     modifier = Modifier.fillMaxSize(),
+                    currentUserId = state.currentUserId,
                     onUndo = { entry ->
                         scope.launch {
                             runCatching { repo.api.deleteCompletion(entry.id) }
@@ -538,6 +539,49 @@ fun HomeScreen(
                                     snackbarHost.showSnackbar("Completion undone")
                                 }
                                 .onFailure { snackbarHost.showSnackbar("Undo failed: ${it.message}") }
+                        }
+                    },
+                    onReact = { completionId, emoji ->
+                        scope.launch {
+                            runCatching {
+                                repo.api.reactToCompletion(
+                                    completionId,
+                                    com.chore.tracker.data.ReactionRequest(emoji),
+                                )
+                            }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Reaction failed: ${it.message}") }
+                        }
+                    },
+                    onComment = { completionId, text ->
+                        scope.launch {
+                            runCatching {
+                                repo.api.commentOnCompletion(
+                                    completionId,
+                                    com.chore.tracker.data.CommentRequest(text),
+                                )
+                            }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Comment failed: ${it.message}") }
+                        }
+                    },
+                    onEditComment = { completionId, commentId, text ->
+                        scope.launch {
+                            runCatching {
+                                repo.api.editCompletionComment(
+                                    completionId, commentId,
+                                    com.chore.tracker.data.CommentRequest(text),
+                                )
+                            }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Edit failed: ${it.message}") }
+                        }
+                    },
+                    onDeleteComment = { completionId, commentId ->
+                        scope.launch {
+                            runCatching { repo.api.deleteCompletionComment(completionId, commentId) }
+                                .onSuccess { repo.refresh() }
+                                .onFailure { snackbarHost.showSnackbar("Delete failed: ${it.message}") }
                         }
                     },
                 )

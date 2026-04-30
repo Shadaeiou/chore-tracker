@@ -14,6 +14,16 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.44",
+        date = "2026-04-29",
+        bullets = listOf(
+            "React with an emoji or comment on completed activities — tap any row on the Activity tab to open the thread",
+            "Multi-turn comment threads, owners can edit or delete their own comments",
+            "The original completer gets a push notification when someone comments on their work",
+            "Status-bar notification icon is now the sock instead of a white circle",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.43",
         date = "2026-04-29",
         bullets = listOf(

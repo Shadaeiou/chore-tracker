@@ -148,6 +148,28 @@ class FakeApi : ChoreApi {
         deletedCompletions.add(id)
         activityFeed.removeAll { it.id == id }
     }
+    val reactions = mutableListOf<Pair<String, String>>()
+    override suspend fun reactToCompletion(id: String, req: ReactionRequest) {
+        maybeThrow(); reactions.add(id to req.emoji)
+    }
+    val commentsByCompletion = mutableMapOf<String, MutableList<ActivityComment>>()
+    override suspend fun commentOnCompletion(id: String, req: CommentRequest): ActivityComment {
+        maybeThrow()
+        val c = ActivityComment(
+            id = "comment-${commentsByCompletion.values.sumOf { it.size } + 1}",
+            userId = nextAuth.userId, text = req.text, createdAt = System.currentTimeMillis(),
+        )
+        commentsByCompletion.getOrPut(id) { mutableListOf() }.add(c)
+        return c
+    }
+    override suspend fun editCompletionComment(id: String, commentId: String, req: CommentRequest) {
+        maybeThrow()
+        commentsByCompletion[id]?.replaceAll { if (it.id == commentId) it.copy(text = req.text) else it }
+    }
+    override suspend fun deleteCompletionComment(id: String, commentId: String) {
+        maybeThrow()
+        commentsByCompletion[id]?.removeAll { it.id == commentId }
+    }
     override suspend fun deleteTask(id: String) { maybeThrow(); tasks.removeAll { it.id == id } }
     override suspend fun activity(before: Long?, limit: Int?): List<ActivityEntry> {
         maybeThrow(); return activityFeed.toList()

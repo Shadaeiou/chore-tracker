@@ -988,8 +988,60 @@ app.get("/api/activity", async (c) => {
         AND c.done_at < ?
       ORDER BY c.done_at DESC
       LIMIT ?`,
-  ).bind(hh, before, limit).all();
-  return c.json(results);
+  ).bind(hh, before, limit).all<{
+    id: string; taskId: string; taskName: string; areaName: string;
+    doneById: string; doneBy: string; doneByAvatarVersion: number;
+    doneAt: number; notes: string | null;
+  }>();
+  if (results.length === 0) return c.json([]);
+
+  // Pull reactions and comments in two extra queries and stitch onto each
+  // entry. Faster than N+1 round-trips and easier than embedding JSON in
+  // the main query. The IN-clause is built dynamically; D1 doesn't support
+  // array binding so we expand to N placeholders.
+  const ids = results.map((r) => r.id);
+  const placeholders = ids.map(() => "?").join(", ");
+  const [reactionsResult, commentsResult] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `SELECT completion_id AS completionId, user_id AS userId, emoji
+         FROM completion_reactions WHERE completion_id IN (${placeholders})`,
+    ).bind(...ids),
+    c.env.DB.prepare(
+      `SELECT cc.id, cc.completion_id AS completionId, cc.user_id AS userId,
+              u.display_name AS displayName, u.avatar_version AS avatarVersion,
+              cc.text, cc.created_at AS createdAt
+         FROM completion_comments cc
+         JOIN users u ON u.id = cc.user_id
+        WHERE cc.completion_id IN (${placeholders})
+        ORDER BY cc.created_at`,
+    ).bind(...ids),
+  ]);
+  const reactionsByCompletion = new Map<string, Array<{ userId: string; emoji: string }>>();
+  for (const r of (reactionsResult.results as Array<{ completionId: string; userId: string; emoji: string }>)) {
+    const list = reactionsByCompletion.get(r.completionId) ?? [];
+    list.push({ userId: r.userId, emoji: r.emoji });
+    reactionsByCompletion.set(r.completionId, list);
+  }
+  const commentsByCompletion = new Map<string, Array<{
+    id: string; userId: string; displayName: string; avatarVersion: number;
+    text: string; createdAt: number;
+  }>>();
+  for (const cm of (commentsResult.results as Array<{
+    id: string; completionId: string; userId: string; displayName: string;
+    avatarVersion: number; text: string; createdAt: number;
+  }>)) {
+    const list = commentsByCompletion.get(cm.completionId) ?? [];
+    list.push({
+      id: cm.id, userId: cm.userId, displayName: cm.displayName,
+      avatarVersion: cm.avatarVersion, text: cm.text, createdAt: cm.createdAt,
+    });
+    commentsByCompletion.set(cm.completionId, list);
+  }
+  return c.json(results.map((r) => ({
+    ...r,
+    reactions: reactionsByCompletion.get(r.id) ?? [],
+    comments: commentsByCompletion.get(r.id) ?? [],
+  })));
 });
 
 // ---------- Workload ----------
@@ -1038,6 +1090,128 @@ app.delete("/api/completions/:id", async (c) => {
        ) WHERE id = ?`,
     ).bind(row.task_id, row.task_id),
   ]);
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
+// ---------- Completion reactions and comments ----------
+
+const COMPLETION_LOOKUP_SQL = `SELECT c.id, c.user_id, t.name AS task_name
+  FROM completions c
+  JOIN tasks t ON t.id = c.task_id
+  JOIN areas a ON a.id = t.area_id
+  WHERE c.id = ? AND a.household_id = ?`;
+
+app.post("/api/completions/:id/reactions", async (c) => {
+  const { sub, hh } = c.get("user");
+  const completionId = c.req.param("id");
+  const body = await c.req.json<{ emoji: string }>();
+  const emoji = body.emoji?.trim() ?? "";
+  const completion = await c.env.DB.prepare(COMPLETION_LOOKUP_SQL)
+    .bind(completionId, hh)
+    .first<{ id: string; user_id: string; task_name: string }>();
+  if (!completion) throw new HTTPException(404);
+  // Empty emoji clears the reaction; otherwise upsert (one per user per
+  // completion). Tapping the same emoji twice clears it client-side.
+  if (!emoji) {
+    await c.env.DB.prepare(
+      `DELETE FROM completion_reactions WHERE completion_id = ? AND user_id = ?`,
+    ).bind(completionId, sub).run();
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO completion_reactions (completion_id, user_id, emoji, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(completion_id, user_id) DO UPDATE SET emoji = excluded.emoji,
+                                                          created_at = excluded.created_at`,
+    ).bind(completionId, sub, emoji, Date.now()).run();
+  }
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
+app.post("/api/completions/:id/comments", async (c) => {
+  const { sub, hh } = c.get("user");
+  const completionId = c.req.param("id");
+  const body = await c.req.json<{ text: string }>();
+  const text = body.text?.trim() ?? "";
+  if (!text) throw new HTTPException(400, { message: "text required" });
+  const completion = await c.env.DB.prepare(COMPLETION_LOOKUP_SQL)
+    .bind(completionId, hh)
+    .first<{ id: string; user_id: string; task_name: string }>();
+  if (!completion) throw new HTTPException(404);
+  const id = newId();
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO completion_comments (id, completion_id, user_id, text, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).bind(id, completionId, sub, text, now).run();
+  await fanOutRefresh(c, hh, sub);
+
+  // Push to the original completer when someone else comments on their work.
+  // Skip self-comments and silent on reactions to keep notification noise low.
+  if (c.env.FCM_SERVICE_ACCOUNT && completion.user_id !== sub) {
+    const { results: tokenRows } = await c.env.DB.prepare(
+      "SELECT token FROM device_tokens WHERE user_id = ?",
+    ).bind(completion.user_id).all<{ token: string }>();
+    const tokens = tokenRows.map((r) => r.token);
+    if (tokens.length > 0) {
+      const actor = await c.env.DB.prepare(
+        "SELECT display_name FROM users WHERE id = ?",
+      ).bind(sub).first<{ display_name: string }>();
+      c.executionCtx.waitUntil(
+        sendToTokens(
+          tokens,
+          {
+            title: `${actor?.display_name ?? "Someone"} on "${completion.task_name}"`,
+            body: text.length > 140 ? text.substring(0, 137) + "…" : text,
+          },
+          c.env,
+        ),
+      );
+    }
+  }
+  return c.json({ id, userId: sub, text, createdAt: now });
+});
+
+app.patch("/api/completions/:id/comments/:commentId", async (c) => {
+  const { sub, hh } = c.get("user");
+  const completionId = c.req.param("id");
+  const commentId = c.req.param("commentId");
+  const body = await c.req.json<{ text: string }>();
+  const text = body.text?.trim() ?? "";
+  if (!text) throw new HTTPException(400, { message: "text required" });
+  const owned = await c.env.DB.prepare(
+    `SELECT cc.id FROM completion_comments cc
+       JOIN completions c ON c.id = cc.completion_id
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE cc.id = ? AND cc.completion_id = ? AND cc.user_id = ?
+        AND a.household_id = ?`,
+  ).bind(commentId, completionId, sub, hh).first();
+  if (!owned) throw new HTTPException(404);
+  await c.env.DB.prepare(
+    `UPDATE completion_comments SET text = ? WHERE id = ?`,
+  ).bind(text, commentId).run();
+  await fanOutRefresh(c, hh, sub);
+  return c.json({ ok: true });
+});
+
+app.delete("/api/completions/:id/comments/:commentId", async (c) => {
+  const { sub, hh } = c.get("user");
+  const completionId = c.req.param("id");
+  const commentId = c.req.param("commentId");
+  const owned = await c.env.DB.prepare(
+    `SELECT cc.id FROM completion_comments cc
+       JOIN completions c ON c.id = cc.completion_id
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE cc.id = ? AND cc.completion_id = ? AND cc.user_id = ?
+        AND a.household_id = ?`,
+  ).bind(commentId, completionId, sub, hh).first();
+  if (!owned) throw new HTTPException(404);
+  await c.env.DB.prepare(
+    `DELETE FROM completion_comments WHERE id = ?`,
+  ).bind(commentId).run();
   await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
 });

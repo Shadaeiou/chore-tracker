@@ -84,7 +84,7 @@ class PushService : FirebaseMessagingService() {
         nm.notify(
             System.currentTimeMillis().toInt(),
             NotificationCompat.Builder(this, channelId)
-                .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                .setSmallIcon(com.chore.tracker.R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setContentIntent(pi)

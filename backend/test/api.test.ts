@@ -886,6 +886,114 @@ describe("GET /api/activity", () => {
   });
 });
 
+describe("/api/completions/:id/reactions and /comments", () => {
+  async function seedCompletion(): Promise<{
+    aliceToken: string; aliceId: string; bobToken: string; bobId: string; completionId: string;
+  }> {
+    const alice = await register({ displayName: "Alice", householdName: "Shared" });
+    const invite = (await (await api("/api/invites", {
+      method: "POST", token: alice.token,
+    })).json()) as { code: string };
+    const bob = await register({ displayName: "Bob", inviteCode: invite.code });
+    const area = (await (await api("/api/areas", {
+      method: "POST", token: alice.token, body: JSON.stringify({ name: "Kitchen" }),
+    })).json()) as { id: string };
+    const task = (await (await api("/api/tasks", {
+      method: "POST", token: alice.token,
+      body: JSON.stringify({ areaId: area.id, name: "Mop", frequencyDays: 7 }),
+    })).json()) as { id: string };
+    await api(`/api/tasks/${task.id}/complete`, { method: "POST", token: alice.token });
+    const activity = (await (await api("/api/activity", { token: alice.token })).json()) as Array<{ id: string }>;
+    return {
+      aliceToken: alice.token, aliceId: alice.userId,
+      bobToken: bob.token, bobId: bob.userId,
+      completionId: activity[0].id,
+    };
+  }
+
+  it("react / replace / clear surfaces in the activity feed", async () => {
+    const { aliceToken, bobToken, bobId, completionId } = await seedCompletion();
+    await api(`/api/completions/${completionId}/reactions`, {
+      method: "POST", token: bobToken, body: JSON.stringify({ emoji: "👍" }),
+    });
+    let feed = (await (await api("/api/activity", { token: aliceToken })).json()) as Array<{
+      id: string; reactions: Array<{ userId: string; emoji: string }>;
+    }>;
+    expect(feed[0].reactions).toEqual([{ userId: bobId, emoji: "👍" }]);
+
+    // Replace with a different emoji.
+    await api(`/api/completions/${completionId}/reactions`, {
+      method: "POST", token: bobToken, body: JSON.stringify({ emoji: "🎉" }),
+    });
+    feed = (await (await api("/api/activity", { token: aliceToken })).json()) as typeof feed;
+    expect(feed[0].reactions).toEqual([{ userId: bobId, emoji: "🎉" }]);
+
+    // Empty emoji clears.
+    await api(`/api/completions/${completionId}/reactions`, {
+      method: "POST", token: bobToken, body: JSON.stringify({ emoji: "" }),
+    });
+    feed = (await (await api("/api/activity", { token: aliceToken })).json()) as typeof feed;
+    expect(feed[0].reactions).toEqual([]);
+  });
+
+  it("comments thread back-and-forth surfaces in order", async () => {
+    const { aliceToken, aliceId, bobToken, bobId, completionId } = await seedCompletion();
+    await api(`/api/completions/${completionId}/comments`, {
+      method: "POST", token: bobToken, body: JSON.stringify({ text: "nice!" }),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    await api(`/api/completions/${completionId}/comments`, {
+      method: "POST", token: aliceToken, body: JSON.stringify({ text: "thanks" }),
+    });
+    const feed = (await (await api("/api/activity", { token: aliceToken })).json()) as Array<{
+      id: string; comments: Array<{ userId: string; text: string }>;
+    }>;
+    expect(feed[0].comments.map((c) => c.text)).toEqual(["nice!", "thanks"]);
+    expect(feed[0].comments[0].userId).toBe(bobId);
+    expect(feed[0].comments[1].userId).toBe(aliceId);
+  });
+
+  it("only the comment owner can edit or delete it", async () => {
+    const { aliceToken, bobToken, completionId } = await seedCompletion();
+    const commentRes = await api(`/api/completions/${completionId}/comments`, {
+      method: "POST", token: bobToken, body: JSON.stringify({ text: "first" }),
+    });
+    const comment = (await commentRes.json()) as { id: string };
+    const aliceEdit = await api(
+      `/api/completions/${completionId}/comments/${comment.id}`,
+      { method: "PATCH", token: aliceToken, body: JSON.stringify({ text: "hijack" }) },
+    );
+    expect(aliceEdit.status).toBe(404);
+    const aliceDelete = await api(
+      `/api/completions/${completionId}/comments/${comment.id}`,
+      { method: "DELETE", token: aliceToken },
+    );
+    expect(aliceDelete.status).toBe(404);
+    const bobEdit = await api(
+      `/api/completions/${completionId}/comments/${comment.id}`,
+      { method: "PATCH", token: bobToken, body: JSON.stringify({ text: "edited" }) },
+    );
+    expect(bobEdit.status).toBe(200);
+    const feed = (await (await api("/api/activity", { token: bobToken })).json()) as Array<{
+      comments: Array<{ text: string }>;
+    }>;
+    expect(feed[0].comments[0].text).toBe("edited");
+  });
+
+  it("rejects reactions/comments from outside the household", async () => {
+    const { completionId } = await seedCompletion();
+    const charlie = await register();
+    const reactRes = await api(`/api/completions/${completionId}/reactions`, {
+      method: "POST", token: charlie.token, body: JSON.stringify({ emoji: "👍" }),
+    });
+    expect(reactRes.status).toBe(404);
+    const commentRes = await api(`/api/completions/${completionId}/comments`, {
+      method: "POST", token: charlie.token, body: JSON.stringify({ text: "spy" }),
+    });
+    expect(commentRes.status).toBe(404);
+  });
+});
+
 describe("GET /api/household/workload", () => {
   it("sums effort points per member for current month completions", async () => {
     const alice = await register({ displayName: "Alice" });

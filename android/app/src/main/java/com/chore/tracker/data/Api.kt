@@ -101,6 +101,25 @@ interface ChoreApi {
     @DELETE("api/completions/{id}")
     suspend fun deleteCompletion(@Path("id") id: String)
 
+    @POST("api/completions/{id}/reactions")
+    suspend fun reactToCompletion(@Path("id") id: String, @Body req: ReactionRequest)
+
+    @POST("api/completions/{id}/comments")
+    suspend fun commentOnCompletion(@Path("id") id: String, @Body req: CommentRequest): ActivityComment
+
+    @PATCH("api/completions/{id}/comments/{commentId}")
+    suspend fun editCompletionComment(
+        @Path("id") id: String,
+        @Path("commentId") commentId: String,
+        @Body req: CommentRequest,
+    )
+
+    @DELETE("api/completions/{id}/comments/{commentId}")
+    suspend fun deleteCompletionComment(
+        @Path("id") id: String,
+        @Path("commentId") commentId: String,
+    )
+
     @DELETE("api/tasks/{id}")
     suspend fun deleteTask(@Path("id") id: String)
 

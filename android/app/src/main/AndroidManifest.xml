@@ -15,6 +15,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ChoreTracker"
         android:usesCleartextTraffic="false">
+        <!-- Sock silhouette in the status bar instead of the default white blob. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
         <service
             android:name=".service.PushService"
             android:exported="false">

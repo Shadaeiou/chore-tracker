@@ -108,7 +108,28 @@ data class ActivityEntry(
     val doneByAvatarVersion: Int = 0,
     val doneAt: Long,
     val notes: String? = null,
+    val reactions: List<ActivityReaction> = emptyList(),
+    val comments: List<ActivityComment> = emptyList(),
 )
+
+@Serializable
+data class ActivityReaction(val userId: String, val emoji: String)
+
+@Serializable
+data class ActivityComment(
+    val id: String,
+    val userId: String,
+    val displayName: String? = null,
+    val avatarVersion: Int = 0,
+    val text: String,
+    val createdAt: Long,
+)
+
+@Serializable
+data class ReactionRequest(val emoji: String)
+
+@Serializable
+data class CommentRequest(val text: String)
 
 @Serializable
 data class WorkloadEntry(
