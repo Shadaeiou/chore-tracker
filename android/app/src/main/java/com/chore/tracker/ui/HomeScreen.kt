@@ -1636,9 +1636,35 @@ private fun ReassignTaskDialog(
     AlertDialog(
         modifier = Modifier.testTag("reassignTaskDialog:${task.name}"),
         onDismissRequest = onDismiss,
-        title = { Text("Assign \"${task.name}\"") },
+        title = { Text(task.name) },
         text = {
             Column {
+                if (!task.notes.isNullOrBlank()) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .testTag("reassignDialogNotes"),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "Notes",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.size(4.dp))
+                            Text(task.notes, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+                Text(
+                    "Assign to",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
                 members.forEach { member ->
                     val selected = member.id == task.assignedTo
                     Row(

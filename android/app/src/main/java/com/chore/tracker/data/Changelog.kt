@@ -14,6 +14,14 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.46",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Tap a chore on Today to see its notes and reassign it in one dialog",
+            "Push notification when a new app update is available; tap to download and install with no detour through Settings",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.45",
         date = "2026-04-29",
         bullets = listOf(

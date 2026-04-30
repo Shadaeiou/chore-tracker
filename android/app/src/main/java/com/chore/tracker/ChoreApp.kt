@@ -7,6 +7,7 @@ import android.os.Build
 import com.chore.tracker.data.DataStoreSession
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
+import com.chore.tracker.service.UpdateCheckWorker
 import com.chore.tracker.ui.AvatarCache
 
 class ChoreApp : Application() {
@@ -21,6 +22,7 @@ class ChoreApp : Application() {
         repo = Repo(session)
         AvatarCache.configure(repo.api)
         createNotificationChannels()
+        UpdateCheckWorker.schedule(applicationContext)
     }
 
     private fun createNotificationChannels() {
