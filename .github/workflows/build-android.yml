@@ -92,3 +92,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/apk/release/app-release.apk
+
+      # Tell the worker about the new release so it fans out an FCM push to
+      # every device token. Requires RELEASE_WEBHOOK_TOKEN repo secret to
+      # match the worker's wrangler secret. No-op when the secret isn't set
+      # so this doesn't break builds during initial bring-up.
+      - name: Notify worker of new release
+        if: github.ref == 'refs/heads/main'
+        env:
+          WORKER_URL: ${{ steps.api.outputs.url }}
+          TOKEN: ${{ secrets.RELEASE_WEBHOOK_TOKEN }}
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "RELEASE_WEBHOOK_TOKEN not set — skipping update push fan-out."
+            exit 0
+          fi
+          # WORKER_URL ends with a trailing slash; trim before appending.
+          ENDPOINT="${WORKER_URL%/}/webhooks/release-announce"
+          curl -fsS -X POST "$ENDPOINT" \
+            -H "authorization: Bearer $TOKEN" \
+            -H "content-type: application/json" \
+            -d "{\"versionName\":\"$NAME\",\"versionCode\":$CODE}" \
+            || echo "::warning::release announce call failed (non-fatal)"

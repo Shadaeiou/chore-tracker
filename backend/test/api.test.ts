@@ -1412,6 +1412,24 @@ describe("/api/todos (à la carte reminders)", () => {
   });
 });
 
+describe("POST /webhooks/release-announce", () => {
+  it("rejects missing or wrong bearer token", async () => {
+    const noAuth = await api("/webhooks/release-announce", {
+      method: "POST",
+      body: JSON.stringify({ versionName: "0.1.99", versionCode: 99 }),
+    });
+    // 401 if RELEASE_WEBHOOK_TOKEN is configured, 503 if not. Both reject.
+    expect([401, 503]).toContain(noAuth.status);
+
+    const wrongAuth = await api("/webhooks/release-announce", {
+      method: "POST",
+      headers: { authorization: "Bearer not-real" },
+      body: JSON.stringify({ versionName: "0.1.99", versionCode: 99 }),
+    });
+    expect([401, 503]).toContain(wrongAuth.status);
+  });
+});
+
 describe("DELETE /api/users/:id (remove from household)", () => {
   it("admin can kick another member", async () => {
     const alice = await register({ householdName: "Shared" });

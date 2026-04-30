@@ -74,6 +74,19 @@ class PushService : FirebaseMessagingService() {
             return
         }
 
+        // App-update push fired by the GitHub release webhook → worker. Skip if
+        // the payload's versionCode isn't actually newer than what we're
+        // running (race condition on a freshly-installed APK), then post a
+        // sock-iconed notification whose tap opens MainActivity in
+        // auto-update mode.
+        if (message.data["type"] == "update") {
+            val versionCode = message.data["versionCode"]?.toIntOrNull() ?: return
+            val versionName = message.data["versionName"].orEmpty()
+            if (versionCode <= com.chore.tracker.BuildConfig.VERSION_CODE) return
+            showUpdateNotification(versionName, versionCode)
+            return
+        }
+
         if (isForegrounded) {
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { repo.refresh() }
             return
@@ -169,6 +182,44 @@ class PushService : FirebaseMessagingService() {
                 .setContentIntent(tapIntent)
                 .addAction(replyAction)
                 .addAction(reactAction)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    /** Notification fired when the GitHub release webhook tells the worker
+     *  there's a newer build. Tap → MainActivity#EXTRA_AUTO_UPDATE which
+     *  downloads + installs without further user navigation. */
+    private fun showUpdateNotification(versionName: String, versionCode: Int) {
+        val channelId = "chore_updates"
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Chore Updates", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        // Stable ID so re-fired update pushes replace, not stack.
+        val notifId = 9001
+        val tapIntent = android.content.Intent(this, com.chore.tracker.MainActivity::class.java).apply {
+            putExtra(com.chore.tracker.MainActivity.EXTRA_AUTO_UPDATE, true)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val pi = PendingIntent.getActivity(
+            this, notifId, tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        nm.notify(
+            notifId,
+            NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(com.chore.tracker.R.drawable.ic_notification)
+                .setContentTitle("App update available")
+                .setContentText("Tap to update to v$versionName (build $versionCode).")
+                .setContentIntent(pi)
+                .addAction(
+                    com.chore.tracker.R.drawable.ic_notification,
+                    "Update now",
+                    pi,
+                )
                 .setAutoCancel(true)
                 .build(),
         )

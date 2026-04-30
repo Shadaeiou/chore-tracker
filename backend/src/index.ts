@@ -10,12 +10,17 @@ import {
   verifyPassword,
   type JwtPayload,
 } from "./auth";
-import { sendToTokens, sendRefreshToTokens, sendCommentToTokens } from "./fcm";
+import { sendToTokens, sendRefreshToTokens, sendCommentToTokens, sendUpdateToTokens } from "./fcm";
 
 type Bindings = {
   DB: D1Database;
   JWT_SECRET: string;
   FCM_SERVICE_ACCOUNT: string;
+  /** Shared secret between the GitHub Actions release workflow and this
+   *  worker. When set, POST /api/releases/announce verifies an
+   *  Authorization: Bearer header against it. Set via
+   *  `wrangler secret put RELEASE_WEBHOOK_TOKEN`. */
+  RELEASE_WEBHOOK_TOKEN?: string;
 };
 
 type Variables = {
@@ -184,6 +189,39 @@ app.use("/api/*", async (c, next) => {
   if (!payload) throw new HTTPException(401, { message: "invalid token" });
   c.set("user", payload);
   await next();
+});
+
+// ---------- Webhook: notify all clients of a new release ----------
+//
+// GitHub Actions calls this after publishing the release tag. The bearer
+// token comes from the RELEASE_WEBHOOK_TOKEN secret on both sides
+// (`wrangler secret put RELEASE_WEBHOOK_TOKEN` here, and a matching repo
+// secret on GitHub). We deliberately mount this on /webhooks to dodge the
+// /api/* JWT middleware above.
+app.post("/webhooks/release-announce", async (c) => {
+  const expected = c.env.RELEASE_WEBHOOK_TOKEN;
+  if (!expected) throw new HTTPException(503, { message: "webhook token not configured" });
+  const auth = c.req.header("authorization");
+  if (auth !== `Bearer ${expected}`) throw new HTTPException(401);
+  const body = await c.req.json<{ versionName?: string; versionCode?: number }>();
+  if (!body.versionName || typeof body.versionCode !== "number") {
+    throw new HTTPException(400, { message: "versionName + versionCode required" });
+  }
+  const { results } = await c.env.DB.prepare(
+    "SELECT token FROM device_tokens",
+  ).all<{ token: string }>();
+  const tokens = results.map((r) => r.token);
+  if (tokens.length === 0) return c.json({ pushed: 0 });
+  if (c.env.FCM_SERVICE_ACCOUNT) {
+    c.executionCtx.waitUntil(
+      sendUpdateToTokens(
+        tokens,
+        { versionName: body.versionName, versionCode: body.versionCode },
+        c.env,
+      ),
+    );
+  }
+  return c.json({ pushed: tokens.length });
 });
 
 // ---------- Household / members ----------

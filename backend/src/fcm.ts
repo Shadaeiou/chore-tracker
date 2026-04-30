@@ -132,6 +132,27 @@ export async function sendCommentToTokens(
   }));
 }
 
+/**
+ * App-update push — fired by the GitHub release webhook to every device
+ * token in the database. Data-only so the Android client can build the
+ * notification with a one-tap "Update now" action.
+ */
+export async function sendUpdateToTokens(
+  tokens: string[],
+  payload: { versionName: string; versionCode: number },
+  env: Env,
+): Promise<void> {
+  await sendFcm(tokens, env, (token) => ({
+    token,
+    data: {
+      type: "update",
+      versionName: payload.versionName,
+      versionCode: String(payload.versionCode),
+    },
+    android: { priority: "HIGH" },
+  }));
+}
+
 async function sendFcm(
   tokens: string[],
   env: Env,

@@ -14,6 +14,13 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.47",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Update notification now fires the moment a new release is published, not on a 24h timer",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.46",
         date = "2026-04-29",
         bullets = listOf(
