@@ -10,7 +10,7 @@ import {
   verifyPassword,
   type JwtPayload,
 } from "./auth";
-import { sendToTokens, sendRefreshToTokens } from "./fcm";
+import { sendToTokens, sendRefreshToTokens, sendCommentToTokens } from "./fcm";
 
 type Bindings = {
   DB: D1Database;
@@ -1148,7 +1148,9 @@ app.post("/api/completions/:id/comments", async (c) => {
   await fanOutRefresh(c, hh, sub);
 
   // Push to the original completer when someone else comments on their work.
-  // Skip self-comments and silent on reactions to keep notification noise low.
+  // Sent data-only so the Android client can build the notification with an
+  // inline reply box + quick-react action button. Reactions stay silent to
+  // keep the channel from getting noisy.
   if (c.env.FCM_SERVICE_ACCOUNT && completion.user_id !== sub) {
     const { results: tokenRows } = await c.env.DB.prepare(
       "SELECT token FROM device_tokens WHERE user_id = ?",
@@ -1159,11 +1161,13 @@ app.post("/api/completions/:id/comments", async (c) => {
         "SELECT display_name FROM users WHERE id = ?",
       ).bind(sub).first<{ display_name: string }>();
       c.executionCtx.waitUntil(
-        sendToTokens(
+        sendCommentToTokens(
           tokens,
           {
-            title: `${actor?.display_name ?? "Someone"} on "${completion.task_name}"`,
-            body: text.length > 140 ? text.substring(0, 137) + "…" : text,
+            completionId,
+            taskName: completion.task_name,
+            actorName: actor?.display_name ?? "Someone",
+            text: text.length > 140 ? text.substring(0, 137) + "…" : text,
           },
           c.env,
         ),

@@ -102,6 +102,36 @@ export async function sendRefreshToTokens(
   }));
 }
 
+/**
+ * Comment push that the Android client builds itself so it can attach
+ * inline-reply + quick-react action buttons. Sent as data-only — the app's
+ * PushService.onMessageReceived handler reads `data.type === "comment"` and
+ * constructs a NotificationCompat with a RemoteInput action and a 👍 react
+ * action. iOS / web clients (none today) would need their own handler.
+ */
+export async function sendCommentToTokens(
+  tokens: string[],
+  payload: {
+    completionId: string;
+    taskName: string;
+    actorName: string;
+    text: string;
+  },
+  env: Env,
+): Promise<void> {
+  await sendFcm(tokens, env, (token) => ({
+    token,
+    data: {
+      type: "comment",
+      completionId: payload.completionId,
+      taskName: payload.taskName,
+      actorName: payload.actorName,
+      text: payload.text,
+    },
+    android: { priority: "HIGH" },
+  }));
+}
+
 async function sendFcm(
   tokens: string[],
   env: Env,

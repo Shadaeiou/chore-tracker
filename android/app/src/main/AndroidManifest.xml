@@ -26,6 +26,11 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+        <!-- Inline-reply + quick-react actions on comment notifications.
+             Same-app PendingIntents fire on this receiver in the background. -->
+        <receiver
+            android:name=".service.CommentActionsReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

@@ -14,6 +14,14 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.45",
+        date = "2026-04-29",
+        bullets = listOf(
+            "Comment notifications now have inline Reply and 👍 React actions — answer right from the notification shade without opening the app",
+            "Fix Android resource-linking error that broke the build for the previous notification-icon update",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.44",
         date = "2026-04-29",
         bullets = listOf(
