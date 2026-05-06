@@ -20,12 +20,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,13 +51,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.chore.tracker.BuildConfig
 import com.chore.tracker.data.DownloadResult
 import com.chore.tracker.data.PatchHouseholdRequest
+import com.chore.tracker.data.PatchRewardSettingsRequest
 import com.chore.tracker.data.Repo
+import com.chore.tracker.data.RewardSettings
 import com.chore.tracker.data.Session
 import com.chore.tracker.data.StatusIndicators
 import com.chore.tracker.data.StatusKey
@@ -91,6 +96,8 @@ fun SettingsScreen(
 
     var pickingColorFor by remember { mutableStateOf<StatusKey?>(null) }
     var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    val rewardSettings = repo?.state?.collectAsState()?.value?.rewardSettings ?: RewardSettings()
+    var showPointRatioDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -338,6 +345,42 @@ fun SettingsScreen(
                 else -> {}
             }
 
+            // Rewards effort ratio.
+            if (repo != null) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Text("⚡ Rewards effort ratio", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Scale your effort points so both partners reach rewards at the same rate. " +
+                        "If you do fewer tasks, set a higher multiplier so each point counts more.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                val ratioDisplay = if (rewardSettings.pointRatio == rewardSettings.pointRatio.toLong().toDouble())
+                    "${rewardSettings.pointRatio.toLong()}×"
+                else "%.2f×".format(rewardSettings.pointRatio)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showPointRatioDialog = true }
+                        .padding(vertical = 12.dp)
+                        .testTag("pointRatioRow"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Your points multiplier", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Each effort point you earn counts as $ratioDisplay toward rewards",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(ratioDisplay, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
@@ -430,6 +473,20 @@ fun SettingsScreen(
             onReset = {
                 scope.launch { session.setStatusColor(key, "") }
                 pickingColorFor = null
+            },
+        )
+    }
+
+    if (showPointRatioDialog && repo != null) {
+        PointRatioDialog(
+            current = rewardSettings.pointRatio,
+            onDismiss = { showPointRatioDialog = false },
+            onConfirm = { ratio ->
+                showPointRatioDialog = false
+                scope.launch {
+                    runCatching { repo.api.patchRewardSettings(PatchRewardSettingsRequest(ratio)) }
+                        .onSuccess { repo.refresh() }
+                }
             },
         )
     }
@@ -654,6 +711,63 @@ private fun Color.toHex(): String = String.format(
     (green * 255).toInt(),
     (blue * 255).toInt(),
 )
+
+@Composable
+private fun PointRatioDialog(
+    current: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (Double) -> Unit,
+) {
+    var ratioText by remember { mutableStateOf(
+        if (current == current.toLong().toDouble()) current.toLong().toString()
+        else "%.2f".format(current)
+    ) }
+    val ratio = ratioText.toDoubleOrNull()
+    val valid = ratio != null && ratio > 0.0
+
+    AlertDialog(
+        modifier = Modifier.testTag("pointRatioDialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("Your points multiplier") },
+        text = {
+            androidx.compose.foundation.layout.Column(
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Each effort point you earn is multiplied by this value when calculating your progress toward rewards. " +
+                        "Example: ratio 5 means 1 point counts as 5 for your rewards goal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = ratioText,
+                    onValueChange = { ratioText = it },
+                    label = { Text("Multiplier (e.g. 1, 2.5, 5)") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("pointRatioField"),
+                )
+                if (!valid && ratioText.isNotBlank()) {
+                    Text(
+                        "Enter a positive number (e.g. 1, 2.5, 5)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = valid,
+                onClick = { onConfirm(ratio!!) },
+                modifier = Modifier.testTag("pointRatioConfirm"),
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 
 private sealed class UpdateUiState {
     data object Idle : UpdateUiState()

@@ -235,7 +235,7 @@ app.get("/api/household", async (c) => {
     .first();
   const { results: members } = await c.env.DB.prepare(
     `SELECT id, display_name AS displayName, email,
-            avatar_version AS avatarVersion, role
+            avatar_version AS avatarVersion, role, profile_color AS profileColor
        FROM users WHERE household_id = ? ORDER BY created_at`,
   )
     .bind(hh)
@@ -261,7 +261,7 @@ app.get("/api/me", async (c) => {
   const { sub } = c.get("user");
   const me = await c.env.DB.prepare(
     `SELECT id, email, display_name AS displayName, avatar,
-            avatar_version AS avatarVersion, role FROM users WHERE id = ?`,
+            avatar_version AS avatarVersion, role, profile_color AS profileColor FROM users WHERE id = ?`,
   ).bind(sub).first();
   if (!me) throw new HTTPException(404);
   return c.json(me);
@@ -269,7 +269,7 @@ app.get("/api/me", async (c) => {
 
 app.patch("/api/me", async (c) => {
   const { sub, hh } = c.get("user");
-  const body = await c.req.json<{ displayName?: string; avatar?: string | null }>();
+  const body = await c.req.json<{ displayName?: string; avatar?: string | null; profileColor?: string | null }>();
   const sets: string[] = [];
   const bindings: unknown[] = [];
   if (body.displayName !== undefined) {
@@ -285,13 +285,21 @@ app.patch("/api/me", async (c) => {
     bindings.push(body.avatar ?? null);
     sets.push("avatar_version = avatar_version + 1");
   }
+  if ("profileColor" in body) {
+    const color = body.profileColor?.trim() ?? null;
+    if (color !== null && !/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      throw new HTTPException(400, { message: "profileColor must be #RRGGBB or null" });
+    }
+    sets.push("profile_color = ?");
+    bindings.push(color);
+  }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
   bindings.push(sub);
   await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();
   await fanOutRefresh(c, hh, sub);
   const me = await c.env.DB.prepare(
     `SELECT id, email, display_name AS displayName, avatar,
-            avatar_version AS avatarVersion, role FROM users WHERE id = ?`,
+            avatar_version AS avatarVersion, role, profile_color AS profileColor FROM users WHERE id = ?`,
   ).bind(sub).first();
   return c.json(me);
 });
@@ -333,9 +341,9 @@ app.get("/api/users/:id/avatar", async (c) => {
   const { hh } = c.get("user");
   const id = c.req.param("id");
   const row = await c.env.DB.prepare(
-    `SELECT avatar, avatar_version AS avatarVersion FROM users
+    `SELECT avatar, avatar_version AS avatarVersion, profile_color AS profileColor FROM users
        WHERE id = ? AND household_id = ?`,
-  ).bind(id, hh).first<{ avatar: string | null; avatarVersion: number }>();
+  ).bind(id, hh).first<{ avatar: string | null; avatarVersion: number; profileColor: string | null }>();
   if (!row) throw new HTTPException(404);
   return c.json(row);
 });
@@ -1399,6 +1407,108 @@ app.delete("/api/todos/:id", async (c) => {
   if (!res.meta.changes) throw new HTTPException(404);
   await fanOutRefresh(c, hh, sub);
   return c.json({ ok: true });
+});
+
+// ---------- Rewards ----------
+
+app.get("/api/rewards", async (c) => {
+  const { hh } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, name, emoji, effort_cost AS effortCost, created_by AS createdBy,
+            created_at AS createdAt, is_active AS isActive
+       FROM rewards WHERE household_id = ? ORDER BY effort_cost ASC`,
+  ).bind(hh).all();
+  return c.json(results.map((r: any) => ({ ...r, isActive: r.isActive !== 0 })));
+});
+
+app.post("/api/rewards", async (c) => {
+  const { sub, hh } = c.get("user");
+  const body = await c.req.json<{ name?: string; emoji?: string; effortCost?: number }>();
+  const name = body.name?.trim();
+  if (!name) throw new HTTPException(400, { message: "name required" });
+  const emoji = body.emoji?.trim() || "🏆";
+  const effortCost = body.effortCost ?? 100;
+  if (effortCost < 1) throw new HTTPException(400, { message: "effortCost must be >= 1" });
+  const id = newId();
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO rewards (id, household_id, name, emoji, effort_cost, created_by, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+  ).bind(id, hh, name, emoji, effortCost, sub, now).run();
+  return c.json({ id, name, emoji, effortCost, createdBy: sub, createdAt: now, isActive: true });
+});
+
+app.patch("/api/rewards/:id", async (c) => {
+  const { hh } = c.get("user");
+  const rewardId = c.req.param("id");
+  const body = await c.req.json<{ name?: string; emoji?: string; effortCost?: number; isActive?: boolean }>();
+  const reward = await c.env.DB.prepare(
+    `SELECT id FROM rewards WHERE id = ? AND household_id = ?`,
+  ).bind(rewardId, hh).first();
+  if (!reward) throw new HTTPException(404);
+  const sets: string[] = [];
+  const bindings: unknown[] = [];
+  if (body.name !== undefined) {
+    if (!body.name.trim()) throw new HTTPException(400, { message: "name cannot be blank" });
+    sets.push("name = ?"); bindings.push(body.name.trim());
+  }
+  if (body.emoji !== undefined) { sets.push("emoji = ?"); bindings.push(body.emoji.trim() || "🏆"); }
+  if (body.effortCost !== undefined) { sets.push("effort_cost = ?"); bindings.push(body.effortCost); }
+  if (body.isActive !== undefined) { sets.push("is_active = ?"); bindings.push(body.isActive ? 1 : 0); }
+  if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
+  bindings.push(rewardId);
+  await c.env.DB.prepare(`UPDATE rewards SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();
+  return c.json({ ok: true });
+});
+
+app.delete("/api/rewards/:id", async (c) => {
+  const { hh } = c.get("user");
+  const rewardId = c.req.param("id");
+  const res = await c.env.DB.prepare(
+    `DELETE FROM rewards WHERE id = ? AND household_id = ?`,
+  ).bind(rewardId, hh).run();
+  if (!res.meta.changes) throw new HTTPException(404);
+  return c.json({ ok: true });
+});
+
+// ---------- Reward settings (per-user point ratio) ----------
+
+app.get("/api/me/reward-settings", async (c) => {
+  const { sub } = c.get("user");
+  const row = await c.env.DB.prepare(
+    `SELECT point_ratio AS pointRatio FROM user_reward_settings WHERE user_id = ?`,
+  ).bind(sub).first<{ pointRatio: number }>();
+  return c.json({ pointRatio: row?.pointRatio ?? 1.0 });
+});
+
+app.patch("/api/me/reward-settings", async (c) => {
+  const { sub } = c.get("user");
+  const body = await c.req.json<{ pointRatio?: number }>();
+  if (body.pointRatio === undefined) throw new HTTPException(400, { message: "pointRatio required" });
+  if (body.pointRatio <= 0) throw new HTTPException(400, { message: "pointRatio must be > 0" });
+  await c.env.DB.prepare(
+    `INSERT INTO user_reward_settings (user_id, point_ratio) VALUES (?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET point_ratio = excluded.point_ratio`,
+  ).bind(sub, body.pointRatio).run();
+  return c.json({ pointRatio: body.pointRatio });
+});
+
+// ---------- All-time effort totals (for rewards progress) ----------
+
+app.get("/api/household/effort-totals", async (c) => {
+  const { hh } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT u.id AS userId, u.display_name AS displayName,
+            COALESCE(SUM(t.effort_points), 0) AS effortPoints
+       FROM users u
+       LEFT JOIN completions c ON c.user_id = u.id
+       LEFT JOIN tasks t ON t.id = c.task_id
+       LEFT JOIN areas a ON a.id = t.area_id AND a.household_id = ?
+      WHERE u.household_id = ?
+      GROUP BY u.id
+      ORDER BY effortPoints DESC`,
+  ).bind(hh, hh).all();
+  return c.json(results);
 });
 
 // ---------- Error handler ----------

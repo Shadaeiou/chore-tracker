@@ -333,6 +333,12 @@ fun HomeScreen(
                     modifier = Modifier.testTag("tab:activity"),
                     text = { Text("Activity") },
                 )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    modifier = Modifier.testTag("tab:rewards"),
+                    text = { Text("Rewards") },
+                )
             }
             when (selectedTab) {
                 // ── Today tab: tasks due today or earlier, no workload here ──
@@ -585,6 +591,19 @@ fun HomeScreen(
                         }
                     },
                 )
+                // ── Rewards tab ──────────────────────────────────────────────
+                3 -> PullToRefreshBox(
+                    state = pullState,
+                    isRefreshing = state.isLoading,
+                    onRefresh = { scope.launch { repo.refresh() } },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    RewardsScreen(
+                        state = visibleState,
+                        repo = repo,
+                        snackbarHost = snackbarHost,
+                    )
+                }
             }
         }
     }
@@ -1420,6 +1439,7 @@ private fun TodayList(
             }
     }
 
+    val myMember = remember(state.members, me) { state.members.firstOrNull { it.id == me } }
     var showAddTodo by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -1427,10 +1447,18 @@ private fun TodayList(
     ) {
         // ── Your today ───────────────────────────────────────────────────
         item("yourHeader") {
-            ReminderSectionHeader(
-                title = "Your today",
-                onAdd = { showAddTodo = true },
-            )
+            if (myMember != null) {
+                MemberSectionHeader(
+                    member = myMember,
+                    title = "Your today",
+                    onAdd = { showAddTodo = true },
+                )
+            } else {
+                ReminderSectionHeader(
+                    title = "Your today",
+                    onAdd = { showAddTodo = true },
+                )
+            }
         }
         items(myTodos, key = { "todo-${it.id}" }) { todo ->
             TodoRow(
@@ -1518,25 +1546,49 @@ private fun TodayList(
 private fun MemberSectionHeader(
     member: Member,
     title: String,
+    onAdd: (() -> Unit)? = null,
 ) {
-    Row(
+    val ringColor = member.profileColor?.let { hex ->
+        runCatching {
+            val s = hex.removePrefix("#")
+            if (s.length == 6) Color(android.graphics.Color.parseColor("#$s")) else null
+        }.getOrNull()
+    }
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp)
             .testTag("memberSection:${member.displayName}"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        AvatarBadge(
-            userId = member.id,
-            avatarVersion = member.avatarVersion,
-            fallbackText = member.displayName.take(1).uppercase(),
-            size = 24,
-        )
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AvatarBadge(
+                userId = member.id,
+                avatarVersion = member.avatarVersion,
+                fallbackText = member.displayName.take(1).uppercase(),
+                size = 28,
+                ringColor = ringColor,
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            if (onAdd != null) {
+                IconButton(
+                    modifier = Modifier.testTag("addTodoButton"),
+                    onClick = onAdd,
+                ) { Icon(Icons.Default.Add, contentDescription = "Add reminder") }
+            }
+        }
     }
 }
 
@@ -2035,6 +2087,20 @@ private fun TaskRow(
     val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
 
+    // Background tints: overdue = light red, snoozed = dark amber, normal = surface
+    val rowContainerColor = when {
+        snoozed -> Color(0xFFFFF3CD) // warm amber for snoozed
+        isOverdue -> Color(0xFFFFEBEE) // light red for overdue
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val rowContainerColorDark = when {
+        snoozed -> Color(0xFF3D3000)
+        isOverdue -> Color(0xFF3B0000)
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val isDarkTheme = !androidx.compose.material3.MaterialTheme.colorScheme.background.isLight()
+    val effectiveContainerColor = if (isDarkTheme) rowContainerColorDark else rowContainerColor
+
     SwipeToDismissBox(
         state = swipeState,
         modifier = Modifier
@@ -2073,7 +2139,7 @@ private fun TaskRow(
     ) {
         androidx.compose.material3.Surface(
             shape = rowShape,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = effectiveContainerColor,
             tonalElevation = 1.dp,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -2110,14 +2176,29 @@ private fun TaskRow(
                 Spacer(Modifier.size(12.dp))
                 // Title + tag row
                 Column(Modifier.weight(1f)) {
-                    Text(task.name, style = MaterialTheme.typography.bodyLarge)
+                    // Overdue tasks get bold name; snoozed get italic + amber text
+                    val nameStyle = when {
+                        isOverdue -> MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        )
+                        snoozed -> MaterialTheme.typography.bodyLarge.copy(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                        else -> MaterialTheme.typography.bodyLarge
+                    }
+                    val nameColor = when {
+                        isOverdue -> Color(0xFFB71C1C)
+                        snoozed -> Color(0xFFE65100)
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                    Text(task.name, style = nameStyle, color = nameColor)
                     Spacer(Modifier.size(4.dp))
                     if (snoozed) {
                         val days = ((task.snoozedUntil!! - now) / dayMs).coerceAtLeast(0)
                         Text(
-                            "snoozed · $days day${if (days == 1L) "" else "s"} left",
+                            "💤 snoozed · $days day${if (days == 1L) "" else "s"} left",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.tertiary,
+                            color = Color(0xFFE65100),
                         )
                     } else {
                         FlowRow(
@@ -2168,6 +2249,13 @@ private fun TaskRow(
             }
         }
     }
+}
+
+private fun Color.isLight(): Boolean {
+    val r = red * 0.299f
+    val g = green * 0.587f
+    val b = blue * 0.114f
+    return (r + g + b) > 0.5f
 }
 
 @Composable

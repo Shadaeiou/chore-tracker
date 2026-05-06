@@ -175,6 +175,7 @@ data class Member(
     val email: String,
     val avatarVersion: Int = 0,
     val role: String = "member",
+    val profileColor: String? = null,
 )
 
 @Serializable
@@ -185,18 +186,64 @@ data class UserProfile(
     val avatar: String? = null,
     val avatarVersion: Int = 0,
     val role: String = "member",
+    val profileColor: String? = null,
 )
 
 @Serializable
 data class PatchProfileRequest(
     val displayName: String? = null,
     val avatar: String? = null,
+    val profileColor: String? = null,
 )
 
 @Serializable
 data class UserAvatarResponse(
     val avatar: String? = null,
     val avatarVersion: Int = 0,
+    val profileColor: String? = null,
+)
+
+@Serializable
+data class Reward(
+    val id: String,
+    val name: String,
+    val emoji: String = "🏆",
+    val effortCost: Int = 100,
+    val createdBy: String,
+    val createdAt: Long,
+    val isActive: Boolean = true,
+)
+
+@Serializable
+data class CreateRewardRequest(
+    val name: String,
+    val emoji: String = "🏆",
+    val effortCost: Int = 100,
+)
+
+@Serializable
+data class PatchRewardRequest(
+    val name: String? = null,
+    val emoji: String? = null,
+    val effortCost: Int? = null,
+    val isActive: Boolean? = null,
+)
+
+@Serializable
+data class RewardSettings(
+    val pointRatio: Double = 1.0,
+)
+
+@Serializable
+data class PatchRewardSettingsRequest(
+    val pointRatio: Double,
+)
+
+@Serializable
+data class EffortTotalEntry(
+    val userId: String,
+    val displayName: String,
+    val effortPoints: Int,
 )
 
 @Serializable

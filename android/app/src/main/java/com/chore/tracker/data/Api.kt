@@ -132,6 +132,9 @@ interface ChoreApi {
     @GET("api/household/workload")
     suspend fun workload(): List<WorkloadEntry>
 
+    @GET("api/household/effort-totals")
+    suspend fun effortTotals(): List<EffortTotalEntry>
+
     @GET("api/task-templates")
     suspend fun taskTemplates(@Query("area") area: String? = null): List<TaskTemplate>
 
@@ -140,6 +143,24 @@ interface ChoreApi {
 
     @DELETE("api/device-tokens/{token}")
     suspend fun deleteDeviceToken(@Path("token") token: String)
+
+    @GET("api/rewards")
+    suspend fun rewards(): List<Reward>
+
+    @POST("api/rewards")
+    suspend fun createReward(@Body req: CreateRewardRequest): Reward
+
+    @PATCH("api/rewards/{id}")
+    suspend fun patchReward(@Path("id") id: String, @Body req: PatchRewardRequest)
+
+    @DELETE("api/rewards/{id}")
+    suspend fun deleteReward(@Path("id") id: String)
+
+    @GET("api/me/reward-settings")
+    suspend fun rewardSettings(): RewardSettings
+
+    @PATCH("api/me/reward-settings")
+    suspend fun patchRewardSettings(@Body req: PatchRewardSettingsRequest): RewardSettings
 }
 
 object ApiFactory {

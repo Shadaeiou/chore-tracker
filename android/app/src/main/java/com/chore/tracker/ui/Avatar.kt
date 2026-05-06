@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -21,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -78,7 +80,7 @@ private fun scaleToFit(src: Bitmap, maxEdge: Int): Bitmap {
  *  this cache fetches the actual data URL on first render and reuses the
  *  decoded bitmap until the version changes. Configure once on app start. */
 object AvatarCache {
-    private data class Entry(val version: Int, val bitmap: ImageBitmap?)
+    private data class Entry(val version: Int, val bitmap: ImageBitmap?, val profileColorHex: String? = null)
 
     private val cache = ConcurrentHashMap<String, Entry>()
     private val mutex = Mutex()
@@ -97,18 +99,31 @@ object AvatarCache {
             cache[userId]?.let { if (it.version == version) return it.bitmap }
             val resp = runCatching { api.userAvatar(userId) }.getOrNull()
             val bmp = decodeAvatarDataUrl(resp?.avatar)
-            cache[userId] = Entry(resp?.avatarVersion ?: version, bmp)
+            cache[userId] = Entry(resp?.avatarVersion ?: version, bmp, resp?.profileColor)
             bmp
         }
     }
 
+    /** Returns the profile ring color for [userId], fetching if missing or stale. */
+    suspend fun getProfileColor(userId: String, version: Int): Color? {
+        cache[userId]?.let { if (it.version == version) return it.profileColorHex?.let(::parseHexColor) }
+        get(userId, version)
+        return cache[userId]?.profileColorHex?.let(::parseHexColor)
+    }
+
     /** Seed the cache from a known data URL — used after the user uploads their own. */
-    fun put(userId: String, version: Int, dataUrl: String?) {
-        cache[userId] = Entry(version, decodeAvatarDataUrl(dataUrl))
+    fun put(userId: String, version: Int, dataUrl: String?, profileColorHex: String? = null) {
+        cache[userId] = Entry(version, decodeAvatarDataUrl(dataUrl), profileColorHex)
     }
 
     fun clear() {
         cache.clear()
+    }
+
+    private fun parseHexColor(hex: String): Color? {
+        val s = hex.trim().removePrefix("#")
+        if (s.length != 6) return null
+        return runCatching { Color(android.graphics.Color.parseColor("#$s")) }.getOrNull()
     }
 }
 
@@ -119,12 +134,20 @@ fun AvatarBadge(
     avatarVersion: Int,
     fallbackText: String,
     size: Int,
+    ringColor: Color? = null,
 ) {
     var bitmap by remember(userId, avatarVersion) { mutableStateOf<ImageBitmap?>(null) }
+    var fetchedRingColor by remember(userId, avatarVersion) { mutableStateOf<Color?>(ringColor) }
     LaunchedEffect(userId, avatarVersion) {
-        bitmap = if (userId != null) AvatarCache.get(userId, avatarVersion) else null
+        if (userId != null) {
+            bitmap = AvatarCache.get(userId, avatarVersion)
+            fetchedRingColor = ringColor ?: AvatarCache.getProfileColor(userId, avatarVersion)
+        } else {
+            bitmap = null
+            fetchedRingColor = ringColor
+        }
     }
-    AvatarSurface(bitmap = bitmap, fallbackText = fallbackText, size = size)
+    AvatarSurface(bitmap = bitmap, fallbackText = fallbackText, size = size, ringColor = fetchedRingColor)
 }
 
 /** Avatar driven directly by a local data URL — used for the live preview while editing. */
@@ -133,9 +156,10 @@ fun AvatarPreview(
     avatarDataUrl: String?,
     fallbackText: String,
     size: Int,
+    ringColor: Color? = null,
 ) {
     val bitmap = remember(avatarDataUrl) { decodeAvatarDataUrl(avatarDataUrl) }
-    AvatarSurface(bitmap = bitmap, fallbackText = fallbackText, size = size)
+    AvatarSurface(bitmap = bitmap, fallbackText = fallbackText, size = size, ringColor = ringColor)
 }
 
 @Composable
@@ -143,35 +167,49 @@ private fun AvatarSurface(
     bitmap: ImageBitmap?,
     fallbackText: String,
     size: Int,
+    ringColor: Color? = null,
 ) {
+    val ringWidth = if (ringColor != null && size >= 24) 3.dp else 0.dp
+    val innerSize = if (ringColor != null && size >= 24) (size - 4).coerceAtLeast(1) else size
     Box(
         modifier = Modifier
             .size(size.dp)
-            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-            .testTag("avatarPreview"),
+            .then(
+                if (ringColor != null)
+                    Modifier.border(ringWidth, ringColor, CircleShape)
+                else Modifier
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                filterQuality = FilterQuality.Medium,
-                modifier = Modifier
-                    .size(size.dp)
-                    .clip(CircleShape),
-            )
-        } else {
-            val style = when {
-                size <= 28 -> MaterialTheme.typography.labelSmall
-                size <= 48 -> MaterialTheme.typography.titleMedium
-                else -> MaterialTheme.typography.headlineSmall
+        Box(
+            modifier = Modifier
+                .size(innerSize.dp)
+                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                .testTag("avatarPreview"),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    filterQuality = FilterQuality.Medium,
+                    modifier = Modifier
+                        .size(innerSize.dp)
+                        .clip(CircleShape),
+                )
+            } else {
+                val style = when {
+                    size <= 28 -> MaterialTheme.typography.labelSmall
+                    size <= 48 -> MaterialTheme.typography.titleMedium
+                    else -> MaterialTheme.typography.headlineSmall
+                }
+                Text(
+                    fallbackText,
+                    style = style,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
-            Text(
-                fallbackText,
-                style = style,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
         }
     }
 }
