@@ -30,15 +30,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as ChoreApp
         if (intent?.getBooleanExtra(EXTRA_AUTO_UPDATE, false) == true) {
-            // Reset the flag so a config-change recreate doesn't re-trigger.
             intent.removeExtra(EXTRA_AUTO_UPDATE)
             startAutoUpdateFlow()
+        }
+        intent?.getStringExtra(EXTRA_RPS_GAME_ID)?.let { gameId ->
+            intent.removeExtra(EXTRA_RPS_GAME_ID)
+            (application as ChoreApp).pendingRpsGameId.value = gameId
         }
         setContent {
             val themeMode by app.session.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
@@ -56,6 +60,10 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_AUTO_UPDATE, false)) {
             intent.removeExtra(EXTRA_AUTO_UPDATE)
             startAutoUpdateFlow()
+        }
+        intent.getStringExtra(EXTRA_RPS_GAME_ID)?.let { gameId ->
+            intent.removeExtra(EXTRA_RPS_GAME_ID)
+            (application as ChoreApp).pendingRpsGameId.value = gameId
         }
         setIntent(intent)
     }
@@ -101,6 +109,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_AUTO_UPDATE = "auto_update"
+        const val EXTRA_RPS_GAME_ID = "rps_game_id"
     }
 }
 
@@ -109,6 +118,16 @@ private fun Root(app: ChoreApp) {
     val nav = rememberNavController()
     val token by app.session.tokenFlow.collectAsState(initial = null)
     val start = if (token == null) "auth" else "home"
+    val pendingRpsGameId by app.pendingRpsGameId.collectAsState()
+
+    // Navigate to the RPS game screen when a push notification is tapped.
+    LaunchedEffect(pendingRpsGameId, token) {
+        val gameId = pendingRpsGameId ?: return@LaunchedEffect
+        if (token == null) return@LaunchedEffect
+        app.pendingRpsGameId.value = null
+        nav.navigate("rps/$gameId")
+    }
+
     NavHost(nav, startDestination = start) {
         composable("auth") {
             AuthScreen(repo = app.repo, onSignedIn = {
@@ -122,11 +141,12 @@ private fun Root(app: ChoreApp) {
                     nav.navigate("auth") { popUpTo("home") { inclusive = true } }
                 },
                 onOpenSettings = { nav.navigate("settings") },
-                onOpenRps = { nav.navigate("rps") },
+                onOpenRps = { nav.navigate("rps/") },
             )
         }
-        composable("rps") {
-            RpsScreen(repo = app.repo, onBack = { nav.popBackStack() })
+        composable("rps/{gameId}") { backStack ->
+            val gameId = backStack.arguments?.getString("gameId")?.takeIf { it.isNotEmpty() }
+            RpsScreen(repo = app.repo, initialGameId = gameId, onBack = { nav.popBackStack() })
         }
         composable("settings") {
             SettingsScreen(

@@ -60,6 +60,20 @@ class PushService : FirebaseMessagingService() {
         // quick-react action. Build the notification ourselves; tapping the
         // body still opens the app (which then navigates to the Activity tab
         // and refreshes).
+        if (message.data["type"] == "rps") {
+            val gameId = message.data["gameId"].orEmpty()
+            val actorName = message.data["actorName"] ?: "Someone"
+            val subtype = message.data["subtype"] ?: "invite"
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { repo.refreshRewardsAndRps() }
+            val (title, body) = when (subtype) {
+                "invite" -> "🪨📄✂️ Game challenge!" to "$actorName challenged you to Rock Paper Scissors"
+                "done"   -> "🏆 Game over!" to "$actorName finished the match — see the result"
+                else     -> "🪨📄✂️ Your turn!" to "$actorName played — make your move"
+            }
+            showRpsNotification(gameId, title, body)
+            return
+        }
+
         if (message.data["type"] == "comment") {
             // Refresh in the background so reactions/comments arrive in-app,
             // but always surface the notification too so the user can act
@@ -115,6 +129,34 @@ class PushService : FirebaseMessagingService() {
 
         nm.notify(
             System.currentTimeMillis().toInt(),
+            NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(com.chore.tracker.R.drawable.ic_notification)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    private fun showRpsNotification(gameId: String, title: String, body: String) {
+        val channelId = "chore_updates"
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(channelId, "Chore Updates", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        val tapIntent = android.content.Intent(this, com.chore.tracker.MainActivity::class.java).apply {
+            putExtra(com.chore.tracker.MainActivity.EXTRA_RPS_GAME_ID, gameId)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val pi = PendingIntent.getActivity(
+            this, gameId.hashCode(), tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        nm.notify(
+            ("rps:$gameId").hashCode(),
             NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(com.chore.tracker.R.drawable.ic_notification)
                 .setContentTitle(title)

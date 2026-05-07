@@ -8,12 +8,15 @@ import com.chore.tracker.data.DataStoreSession
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Session
 import com.chore.tracker.ui.AvatarCache
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class ChoreApp : Application() {
     lateinit var session: Session
         private set
     lateinit var repo: Repo
         private set
+    /** Set when an RPS push notification is tapped; MainActivity navigates to the game. */
+    val pendingRpsGameId = MutableStateFlow<String?>(null)
 
     override fun onCreate() {
         super.onCreate()

@@ -10,7 +10,7 @@ import {
   verifyPassword,
   type JwtPayload,
 } from "./auth";
-import { sendToTokens, sendRefreshToTokens, sendCommentToTokens, sendUpdateToTokens } from "./fcm";
+import { sendToTokens, sendRefreshToTokens, sendCommentToTokens, sendUpdateToTokens, sendRpsNotificationToTokens } from "./fcm";
 
 type Bindings = {
   DB: D1Database;
@@ -1753,6 +1753,13 @@ app.get("/api/me/redemptions", async (c) => {
 
 const RPS_CHOICES = new Set(["rock", "paper", "scissors"]);
 
+async function rpsTokensFor(c: any, userId: string): Promise<string[]> {
+  const { results } = (await c.env.DB.prepare(
+    `SELECT token FROM device_tokens WHERE user_id = ?`,
+  ).bind(userId).all()) as { results: Array<{ token: string }> };
+  return results.map((r) => r.token);
+}
+
 function rpsRoundWinner(a: string, b: string): "a" | "b" | "tie" {
   if (a === b) return "tie";
   if ((a === "rock" && b === "scissors") ||
@@ -1833,6 +1840,23 @@ app.post("/api/rps/games", async (c) => {
     `INSERT INTO rps_rounds (game_id, round_number) VALUES (?, 1)`,
   ).bind(id).run();
   const game = await loadRpsGame(c, hh, id);
+
+  // Notify the opponent that they've been challenged.
+  const challenger = await c.env.DB.prepare(
+    `SELECT display_name AS displayName FROM users WHERE id = ?`,
+  ).bind(sub).first<{ displayName: string }>();
+  const challengerName = challenger?.displayName ?? "Someone";
+  const opponentTokens = await rpsTokensFor(c, opponentId);
+  if (opponentTokens.length > 0) {
+    c.executionCtx.waitUntil(
+      sendRpsNotificationToTokens(
+        opponentTokens,
+        { gameId: id, subtype: "invite", actorName: challengerName },
+        c.env,
+      ),
+    );
+  }
+
   return c.json(maskRpsForViewer(game, sub));
 });
 
@@ -1918,6 +1942,26 @@ app.post("/api/rps/games/:id/play", async (c) => {
   }
 
   const updated = await loadRpsGame(c, hh, gameId);
+
+  // Push notification to the relevant player(s) after this move.
+  const actor = await c.env.DB.prepare(
+    `SELECT display_name AS displayName FROM users WHERE id = ?`,
+  ).bind(sub).first<{ displayName: string }>();
+  const actorName = actor?.displayName ?? "Someone";
+  const otherId = isChallenger ? game.opponentId : game.challengerId;
+  const otherTokens = await rpsTokensFor(c, otherId);
+
+  if (otherTokens.length > 0) {
+    const subtype = updated.status === "finished" ? "done" : "turn";
+    c.executionCtx.waitUntil(
+      sendRpsNotificationToTokens(
+        otherTokens,
+        { gameId, subtype, actorName },
+        c.env,
+      ),
+    );
+  }
+
   return c.json(maskRpsForViewer(updated, sub));
 });
 

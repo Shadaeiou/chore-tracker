@@ -133,6 +133,35 @@ export async function sendCommentToTokens(
 }
 
 /**
+ * RPS invite or turn notification. Data-only so the Android client can build
+ * a notification that deep-links straight into the game.
+ *
+ * subtype: "invite"  — sent to the opponent when a new game is started
+ *          "turn"    — sent to whoever needs to play next after a round resolves
+ *          "done"    — sent to both players when the game finishes
+ */
+export async function sendRpsNotificationToTokens(
+  tokens: string[],
+  payload: {
+    gameId: string;
+    subtype: "invite" | "turn" | "done";
+    actorName: string;
+  },
+  env: Env,
+): Promise<void> {
+  await sendFcm(tokens, env, (token) => ({
+    token,
+    data: {
+      type: "rps",
+      gameId: payload.gameId,
+      subtype: payload.subtype,
+      actorName: payload.actorName,
+    },
+    android: { priority: "HIGH" },
+  }));
+}
+
+/**
  * App-update push — fired by the GitHub release webhook to every device
  * token in the database. Data-only so the Android client can build the
  * notification with a one-tap "Update now" action.

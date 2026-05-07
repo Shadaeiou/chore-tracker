@@ -64,13 +64,13 @@ private enum class RpsScreenMode { LOBBY, MULTI, SOLO }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RpsScreen(repo: Repo, onBack: () -> Unit) {
+fun RpsScreen(repo: Repo, initialGameId: String? = null, onBack: () -> Unit) {
     val state by repo.state.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    var mode by remember { mutableStateOf(RpsScreenMode.LOBBY) }
-    var activeGameId by remember { mutableStateOf<String?>(null) }
+    var mode by remember { mutableStateOf(if (initialGameId != null) RpsScreenMode.MULTI else RpsScreenMode.LOBBY) }
+    var activeGameId by remember { mutableStateOf<String?>(initialGameId) }
 
     // Light auto-refresh while in multi-user mode so the opponent's submission lands.
     LaunchedEffect(mode, activeGameId) {
