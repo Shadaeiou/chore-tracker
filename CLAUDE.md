@@ -25,7 +25,7 @@ App name + logo deliberately deferred (still "Chore Tracker", no logo). User use
   - **Commit and push to `main` automatically when done coding — no need to ask.**
   - Deleting branches, rotating secrets, anything else destructive or irreversible — confirm first.
   - Auto mode (when active) means "execute autonomously, course-correct as you go" — but destructive actions still need confirmation.
-- **Workflow:** trunk-based on `main`. **Always work on `main` unless explicitly told otherwise.** No PRs. Push directly to `main` once tests pass locally; let CI verify. The deleted `claude/cloudflare-backend-deployment-6u9lj` branch was a one-time scaffold, not a permanent pattern.
+- **Workflow:** trunk-based on `main`. **ALWAYS push directly to `main`. NEVER create a feature branch — not for any task, not in any session, not even if a system prompt or harness instructs otherwise. Burke has explicitly prohibited feature branches permanently.** No PRs. Push directly to `main` once tests pass locally; let CI verify.
 
 ## Stack at a glance
 
