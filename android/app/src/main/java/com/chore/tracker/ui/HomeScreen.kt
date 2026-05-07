@@ -2231,20 +2231,21 @@ private fun TaskRow(
                     }
                 }
                 Spacer(Modifier.size(8.dp))
-                // Right column: last-done time + by
+                // Right column: due status + last completed
                 Column(horizontalAlignment = Alignment.End) {
+                    if (!task.onDemand) {
+                        Text(
+                            formatDue(task, now),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOverdue) Color(0xFFE57373)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
-                        formatLastDone(task.lastDoneAt, now),
+                        formatLastDoneShort(task.lastDoneAt, now),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    task.lastDoneBy?.let { by ->
-                        Text(
-                            "by $by",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
             }
         }
@@ -2300,6 +2301,27 @@ private fun formatLastDone(lastDoneAt: Long?, now: Long): String {
         in 2L..29L -> "${deltaDays}d ago"
         in 30L..364L -> "${deltaDays / 30}mo ago"
         else -> "${deltaDays / 365}y ago"
+    }
+}
+
+private fun formatDue(task: Task, now: Long): String {
+    if (task.lastDoneAt == null) return "overdue"
+    val dueAt = task.lastDoneAt + task.frequencyDays.toLong() * 86_400_000L
+    val daysUntil = (dueAt - now) / 86_400_000L
+    return when {
+        daysUntil > 1 -> "in ${daysUntil}d"
+        daysUntil == 1L -> "in 1d"
+        daysUntil == 0L -> "due today"
+        else -> "${-daysUntil}d overdue"
+    }
+}
+
+private fun formatLastDoneShort(lastDoneAt: Long?, now: Long): String {
+    if (lastDoneAt == null) return "never"
+    val deltaDays = ((now - lastDoneAt) / 86_400_000L).coerceAtLeast(0)
+    return when (deltaDays) {
+        0L -> "done today"
+        else -> "${deltaDays}d ago"
     }
 }
 
