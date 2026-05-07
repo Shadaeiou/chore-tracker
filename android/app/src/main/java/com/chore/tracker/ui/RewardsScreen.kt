@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,10 +66,9 @@ import androidx.compose.ui.unit.dp
 import com.chore.tracker.data.CreateRewardRequest
 import com.chore.tracker.data.EffortTotalEntry
 import com.chore.tracker.data.HouseholdState
-import com.chore.tracker.data.PatchRewardSettingsRequest
+import com.chore.tracker.data.PatchRewardRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.Reward
-import com.chore.tracker.data.RewardSettings
 import kotlinx.coroutines.launch
 
 private data class SuggestedReward(val emoji: String, val name: String, val cost: Int)
@@ -96,13 +96,9 @@ fun RewardsScreen(
     snackbarHost: SnackbarHostState,
 ) {
     val scope = rememberCoroutineScope()
-    val me = state.members.firstOrNull { it.id == state.currentUserId }
-    val myEffort = state.effortTotals.firstOrNull { it.userId == state.currentUserId }
-    val myRatio = state.rewardSettings.pointRatio
-    val rawPoints = myEffort?.effortPoints ?: 0
-    val effectivePoints = (rawPoints * myRatio).toLong()
 
-    // Suggestions the user hasn't yet added or dismissed (tracked locally per-session)
+    val totalHouseholdPoints = state.effortTotals.sumOf { it.effortPoints.toLong() }
+
     val addedRewardNames = remember(state.rewards) { state.rewards.map { it.name }.toSet() }
     var dismissedSuggestions by remember { mutableStateOf(setOf<String>()) }
     val visibleSuggestions = remember(addedRewardNames, dismissedSuggestions) {
@@ -113,13 +109,14 @@ fun RewardsScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var addingSuggestion by remember { mutableStateOf<SuggestedReward?>(null) }
+    var editingReward by remember { mutableStateOf<Reward?>(null) }
 
     val activeRewards = remember(state.rewards) { state.rewards.filter { it.isActive } }
-    val nextReward = remember(activeRewards, effectivePoints) {
-        activeRewards.filter { it.effortCost > effectivePoints }.minByOrNull { it.effortCost }
+    val nextReward = remember(activeRewards, totalHouseholdPoints) {
+        activeRewards.filter { it.effortCost > totalHouseholdPoints }.minByOrNull { it.effortCost }
     }
     val progress = if (nextReward != null && nextReward.effortCost > 0) {
-        (effectivePoints.toFloat() / nextReward.effortCost.toFloat()).coerceIn(0f, 1f)
+        (totalHouseholdPoints.toFloat() / nextReward.effortCost.toFloat()).coerceIn(0f, 1f)
     } else if (activeRewards.isNotEmpty()) 1f else 0f
 
     LazyColumn(
@@ -129,7 +126,7 @@ fun RewardsScreen(
             .testTag("rewardsScreen"),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // ── My effort points header ──────────────────────────────────────
+        // ── Household effort header ──────────────────────────────────────
         item("header") {
             Spacer(Modifier.height(12.dp))
             Card(
@@ -152,16 +149,18 @@ fun RewardsScreen(
                         Text("🏆", style = MaterialTheme.typography.headlineMedium)
                         Column {
                             Text(
-                                me?.displayName ?: "Your rewards",
+                                "Household rewards",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
+                            val memberLabel = when (state.effortTotals.size) {
+                                0 -> "no members yet"
+                                1 -> "1 member"
+                                else -> "${state.effortTotals.size} members contributing"
+                            }
                             Text(
-                                "⚡ $effectivePoints effective pts  (${rawPoints} raw × ${
-                                    if (myRatio == myRatio.toLong().toDouble()) myRatio.toLong().toString()
-                                    else String.format("%.1f", myRatio)
-                                }×)",
+                                "⚡ $totalHouseholdPoints pts total · $memberLabel",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                             )
@@ -193,7 +192,7 @@ fun RewardsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                "$effectivePoints pts",
+                                "$totalHouseholdPoints pts",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                             )
@@ -205,7 +204,7 @@ fun RewardsScreen(
                         }
                     } else if (activeRewards.isNotEmpty()) {
                         Text(
-                            "🎉 You have enough points for all rewards!",
+                            "🎉 Your household has enough points for all rewards!",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
@@ -232,9 +231,7 @@ fun RewardsScreen(
                 Spacer(Modifier.height(8.dp))
                 state.effortTotals.forEach { entry ->
                     val member = state.members.firstOrNull { it.id == entry.userId }
-                    val ratio = if (entry.userId == state.currentUserId) myRatio else 1.0
-                    val effective = (entry.effortPoints * ratio).toLong()
-                    HouseholdEffortRow(entry = entry, member = member, effectivePoints = effective)
+                    HouseholdEffortRow(entry = entry, member = member)
                 }
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
@@ -249,7 +246,7 @@ fun RewardsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "🎁 Your rewards",
+                    "🎁 Household rewards",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -273,11 +270,12 @@ fun RewardsScreen(
             }
         } else {
             items(activeRewards, key = { "reward-${it.id}" }) { reward ->
-                val canClaim = effectivePoints >= reward.effortCost
+                val canClaim = totalHouseholdPoints >= reward.effortCost
                 RewardRow(
                     reward = reward,
                     canClaim = canClaim,
-                    effectivePoints = effectivePoints,
+                    householdPoints = totalHouseholdPoints,
+                    onEdit = { editingReward = reward },
                     onDelete = {
                         scope.launch {
                             runCatching { repo.api.deleteReward(reward.id) }
@@ -322,10 +320,12 @@ fun RewardsScreen(
 
     // ── Add custom reward dialog ─────────────────────────────────────────
     if (showAddDialog) {
-        AddRewardDialog(
+        RewardDialog(
+            title = "Add reward",
             initialEmoji = "🏆",
             initialName = "",
             initialCost = 100,
+            confirmLabel = "Add",
             onDismiss = { showAddDialog = false },
             onConfirm = { emoji, name, cost ->
                 showAddDialog = false
@@ -340,10 +340,12 @@ fun RewardsScreen(
 
     // ── Add suggestion as reward ─────────────────────────────────────────
     addingSuggestion?.let { suggestion ->
-        AddRewardDialog(
+        RewardDialog(
+            title = "Add reward",
             initialEmoji = suggestion.emoji,
             initialName = suggestion.name,
             initialCost = suggestion.cost,
+            confirmLabel = "Add",
             onDismiss = { addingSuggestion = null },
             onConfirm = { emoji, name, cost ->
                 addingSuggestion = null
@@ -355,13 +357,34 @@ fun RewardsScreen(
             },
         )
     }
+
+    // ── Edit reward dialog ───────────────────────────────────────────────
+    editingReward?.let { reward ->
+        RewardDialog(
+            title = "Edit reward",
+            initialEmoji = reward.emoji,
+            initialName = reward.name,
+            initialCost = reward.effortCost,
+            confirmLabel = "Save",
+            onDismiss = { editingReward = null },
+            onConfirm = { emoji, name, cost ->
+                editingReward = null
+                scope.launch {
+                    runCatching {
+                        repo.api.patchReward(reward.id, PatchRewardRequest(name, emoji, cost))
+                    }
+                        .onSuccess { repo.refresh() }
+                        .onFailure { snackbarHost.showSnackbar("Failed to save reward: ${it.message}") }
+                }
+            },
+        )
+    }
 }
 
 @Composable
 private fun HouseholdEffortRow(
     entry: EffortTotalEntry,
     member: com.chore.tracker.data.Member?,
-    effectivePoints: Long,
 ) {
     Row(
         modifier = Modifier
@@ -389,7 +412,7 @@ private fun HouseholdEffortRow(
             modifier = Modifier.weight(1f),
         )
         Text(
-            "⚡ $effectivePoints pts",
+            "⚡ ${entry.effortPoints} pts",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.primary,
@@ -402,7 +425,8 @@ private fun HouseholdEffortRow(
 private fun RewardRow(
     reward: Reward,
     canClaim: Boolean,
-    effectivePoints: Long,
+    householdPoints: Long,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -432,15 +456,26 @@ private fun RewardRow(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                 )
-                val remaining = (reward.effortCost - effectivePoints).coerceAtLeast(0)
+                val remaining = (reward.effortCost - householdPoints).coerceAtLeast(0)
                 Text(
-                    if (canClaim) "🎉 You can claim this!"
+                    if (canClaim) "🎉 Household can claim this!"
                     else "🔒 $remaining more pts needed  (${reward.effortCost} total)",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (canClaim)
                         MaterialTheme.colorScheme.onTertiaryContainer
                     else
                         MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.testTag("editReward:${reward.name}"),
+            ) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit reward",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
                 )
             }
             IconButton(
@@ -534,10 +569,12 @@ private fun SuggestionRow(
 }
 
 @Composable
-private fun AddRewardDialog(
+private fun RewardDialog(
+    title: String,
     initialEmoji: String,
     initialName: String,
     initialCost: Int,
+    confirmLabel: String,
     onDismiss: () -> Unit,
     onConfirm: (emoji: String, name: String, cost: Int) -> Unit,
 ) {
@@ -548,9 +585,9 @@ private fun AddRewardDialog(
     val valid = name.isNotBlank() && cost > 0
 
     AlertDialog(
-        modifier = Modifier.testTag("addRewardDialog"),
+        modifier = Modifier.testTag("rewardDialog"),
         onDismissRequest = onDismiss,
-        title = { Text("Add reward") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -582,8 +619,8 @@ private fun AddRewardDialog(
             Button(
                 enabled = valid,
                 onClick = { onConfirm(emoji.ifBlank { "🏆" }, name.trim(), cost) },
-                modifier = Modifier.testTag("addRewardConfirm"),
-            ) { Text("Add") }
+                modifier = Modifier.testTag("rewardConfirm"),
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

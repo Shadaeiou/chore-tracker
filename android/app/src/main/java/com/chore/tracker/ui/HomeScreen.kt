@@ -2058,7 +2058,7 @@ private fun TaskRow(
     val isOverdue = task.lastDoneAt == null || due < startOfToday
     val isDueToday = !isOverdue && due < startOfTomorrow
     val defaultColor = when {
-        isOverdue -> Color(0xFFD32F2F)
+        isOverdue -> Color(0xFFE57373)
         isDueToday -> Color(0xFFFBC02D)
         else -> Color(0xFF388E3C)
     }
@@ -2087,15 +2087,15 @@ private fun TaskRow(
     val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
 
-    // Background tints: overdue = light red, snoozed = dark amber, normal = surface
+    // Background tints: overdue = faint rose, snoozed = dark amber, normal = surface
     val rowContainerColor = when {
-        snoozed -> Color(0xFFFFF3CD) // warm amber for snoozed
-        isOverdue -> Color(0xFFFFEBEE) // light red for overdue
+        snoozed -> Color(0xFFFFF3CD)
+        isOverdue -> Color(0xFFFFF0F0)
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     val rowContainerColorDark = when {
         snoozed -> Color(0xFF3D3000)
-        isOverdue -> Color(0xFF3B0000)
+        isOverdue -> Color(0xFF221414)
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     val isDarkTheme = !androidx.compose.material3.MaterialTheme.colorScheme.background.isLight()
