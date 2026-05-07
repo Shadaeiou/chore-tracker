@@ -14,6 +14,16 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.77",
+        date = "2026-05-06",
+        bullets = listOf(
+            "New Rewards tab — earn effort points from chores, redeem against household-defined rewards, or pick from suggested ones",
+            "Per-user point ratio in Settings so different members' contributions can be weighted (e.g. 1 point for one person counts as 5 for another)",
+            "Profile color ring around your avatar — pick a color in your profile, see it everywhere your avatar shows",
+            "Today tab redesign: overdue tasks bold-red, snoozed tasks italic-amber with 💤, member sections show avatar + ring color",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.48",
         date = "2026-04-29",
         bullets = listOf(

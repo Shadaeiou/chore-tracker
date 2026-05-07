@@ -106,6 +106,7 @@ make test
 - Commit messages: imperative subject, short body explaining the **why**, signed `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 - **Migrations are append-only.** Never edit a published migration. Create a new one with the next sequential number.
 - **API fields are additive.** A stale APK must keep working when the worker ships new fields. Don't remove or rename without a `/v2/` namespace.
+- **Update the user-facing changelog whenever you ship a meaningful, user-visible change.** Prepend a new entry at the top of `CHANGELOG` in `android/app/src/main/java/com/chore/tracker/data/Changelog.kt` — version like `0.1.<commit-count>`, today's date, and short bullets in plain language for what the user will notice. Skip purely internal refactors, test-only changes, or build-config tweaks; otherwise add the entry.
 
 ### Tests
 - Every endpoint gets a backend integration test in `test/api.test.ts` covering happy path, household-scoping (cross-household must 404), and at least one failure mode.
