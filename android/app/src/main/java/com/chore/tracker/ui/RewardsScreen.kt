@@ -400,7 +400,7 @@ private fun CurrentRoundCard(
                     OutlinedButton(
                         onClick = onPlayRps,
                         modifier = Modifier.testTag("playRpsCtaButton"),
-                    ) { Text("Play RPS") }
+                    ) { Text("🪨📄✂️") }
                 }
             } else {
                 Text(

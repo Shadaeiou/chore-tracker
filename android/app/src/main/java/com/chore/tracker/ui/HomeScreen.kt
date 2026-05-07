@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -464,19 +465,20 @@ fun HomeScreen(
                             OutlinedTextField(
                                 value = householdSearchQuery,
                                 onValueChange = { householdSearchQuery = it },
-                                placeholder = { Text("Search — name, @user, 7d, notes, yesterday") },
+                                placeholder = { Text("Search — name, @user, 7d, notes, yesterday", style = MaterialTheme.typography.bodySmall) },
                                 singleLine = true,
-                                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null) },
+                                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, null, modifier = Modifier.size(20.dp)) },
                                 trailingIcon = if (householdSearchQuery.isNotEmpty()) {
                                     @Composable {
                                         IconButton(onClick = { householdSearchQuery = "" }) {
-                                            Icon(androidx.compose.material.icons.Icons.Default.Clear, "Clear")
+                                            Icon(androidx.compose.material.icons.Icons.Default.Clear, "Clear", modifier = Modifier.size(20.dp))
                                         }
                                     }
                                 } else null,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .padding(horizontal = 16.dp, vertical = 2.dp)
                                     .testTag("householdSearchField"),
                             )
                             // Filter areas + tasks based on search
@@ -2084,7 +2086,7 @@ private fun TaskRow(
                 SwipeToDismissBoxValue.Settled -> false
             }
         },
-        positionalThreshold = { distance -> distance * 0.3f },
+        positionalThreshold = { distance -> distance * 0.5f },
     )
     val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
@@ -2178,18 +2180,14 @@ private fun TaskRow(
                 Spacer(Modifier.size(12.dp))
                 // Title + tag row
                 Column(Modifier.weight(1f)) {
-                    // Overdue tasks get bold name; snoozed get italic + amber text
                     val nameStyle = when {
-                        isOverdue -> MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        )
                         snoozed -> MaterialTheme.typography.bodyLarge.copy(
                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                         )
                         else -> MaterialTheme.typography.bodyLarge
                     }
                     val nameColor = when {
-                        isOverdue -> Color(0xFFB71C1C)
+                        isOverdue -> Color.White
                         snoozed -> Color(0xFFE65100)
                         else -> MaterialTheme.colorScheme.onSurface
                     }
