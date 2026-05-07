@@ -17,6 +17,17 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.81",
+        date = "2026-05-07",
+        bullets = listOf(
+            "Rewards now have two pools: shared Household rewards and your own Personal rewards — every effort point you earn lands in both",
+            "Pick a Household reward as the round goal; when the shared pool reaches its cost, claim it as a household win and start a new round",
+            "Personal rewards are private — spend your individual point balance to redeem your own rewards anytime you have enough",
+            "Any household member can add and edit Household rewards (name, emoji, points)",
+            "New rock-paper-scissors mini-game in pixel art — best of 3 between household members; winner gets to pick the next household reward",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.80",
         date = "2026-05-07",
         bullets = listOf(

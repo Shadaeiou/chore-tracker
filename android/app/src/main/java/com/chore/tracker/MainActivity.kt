@@ -21,6 +21,7 @@ import com.chore.tracker.ui.ChoreTheme
 import com.chore.tracker.ui.HomeScreen
 import com.chore.tracker.ui.MembersScreen
 import com.chore.tracker.ui.ProfileScreen
+import com.chore.tracker.ui.RpsScreen
 import com.chore.tracker.ui.SettingsScreen
 import com.chore.tracker.ui.ThemeMode
 import com.chore.tracker.ui.ThemePalette
@@ -121,7 +122,11 @@ private fun Root(app: ChoreApp) {
                     nav.navigate("auth") { popUpTo("home") { inclusive = true } }
                 },
                 onOpenSettings = { nav.navigate("settings") },
+                onOpenRps = { nav.navigate("rps") },
             )
+        }
+        composable("rps") {
+            RpsScreen(repo = app.repo, onBack = { nav.popBackStack() })
         }
         composable("settings") {
             SettingsScreen(

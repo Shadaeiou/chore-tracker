@@ -13,6 +13,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -145,7 +146,7 @@ interface ChoreApi {
     suspend fun deleteDeviceToken(@Path("token") token: String)
 
     @GET("api/rewards")
-    suspend fun rewards(): List<Reward>
+    suspend fun rewards(@Query("scope") scope: String = "household"): List<Reward>
 
     @POST("api/rewards")
     suspend fun createReward(@Body req: CreateRewardRequest): Reward
@@ -161,6 +162,39 @@ interface ChoreApi {
 
     @PATCH("api/me/reward-settings")
     suspend fun patchRewardSettings(@Body req: PatchRewardSettingsRequest): RewardSettings
+
+    @GET("api/household/reward-state")
+    suspend fun householdRewardState(): HouseholdRewardState
+
+    @PUT("api/household/reward-state/selection")
+    suspend fun selectHouseholdReward(@Body req: SelectHouseholdRewardRequest): HouseholdRewardState
+
+    @POST("api/household/reward-state/claim")
+    suspend fun claimHouseholdReward(): HouseholdRewardState
+
+    @GET("api/household/reward-wins")
+    suspend fun householdRewardWins(): List<HouseholdRewardWin>
+
+    @GET("api/me/personal-points")
+    suspend fun personalPoints(): PersonalPoints
+
+    @POST("api/me/redeem/{rewardId}")
+    suspend fun redeemPersonalReward(@Path("rewardId") rewardId: String): RedeemResponse
+
+    @GET("api/me/redemptions")
+    suspend fun personalRedemptions(): List<PersonalRedemption>
+
+    @GET("api/rps/games")
+    suspend fun rpsGames(): List<RpsGame>
+
+    @POST("api/rps/games")
+    suspend fun createRpsGame(@Body req: CreateRpsGameRequest): RpsGame
+
+    @GET("api/rps/games/{id}")
+    suspend fun rpsGame(@Path("id") id: String): RpsGame
+
+    @POST("api/rps/games/{id}/play")
+    suspend fun playRps(@Path("id") id: String, @Body req: PlayRpsRequest): RpsGame
 }
 
 object ApiFactory {

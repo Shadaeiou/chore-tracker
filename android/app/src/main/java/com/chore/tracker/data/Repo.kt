@@ -17,8 +17,12 @@ data class HouseholdState(
     val workload: List<WorkloadEntry> = emptyList(),
     val todos: List<TodoItem> = emptyList(),
     val rewards: List<Reward> = emptyList(),
+    val personalRewards: List<Reward> = emptyList(),
     val rewardSettings: RewardSettings = RewardSettings(),
     val effortTotals: List<EffortTotalEntry> = emptyList(),
+    val rewardState: HouseholdRewardState = HouseholdRewardState(),
+    val personalPoints: PersonalPoints = PersonalPoints(),
+    val rpsGames: List<RpsGame> = emptyList(),
     val pausedUntil: Long? = null,
     val currentUserId: String? = null,
     val isLoading: Boolean = false,
@@ -96,9 +100,13 @@ class Repo(
             val activity = api.activity()
             val workload = api.workload()
             val todos = runCatching { api.todos() }.getOrDefault(emptyList())
-            val rewards = runCatching { api.rewards() }.getOrDefault(emptyList())
+            val rewards = runCatching { api.rewards("household") }.getOrDefault(emptyList())
+            val personalRewards = runCatching { api.rewards("personal") }.getOrDefault(emptyList())
             val rewardSettings = runCatching { api.rewardSettings() }.getOrDefault(RewardSettings())
             val effortTotals = runCatching { api.effortTotals() }.getOrDefault(emptyList())
+            val rewardState = runCatching { api.householdRewardState() }.getOrDefault(HouseholdRewardState())
+            val personalPoints = runCatching { api.personalPoints() }.getOrDefault(PersonalPoints())
+            val rpsGames = runCatching { api.rpsGames() }.getOrDefault(emptyList())
             _state.value = HouseholdState(
                 household = household.household,
                 areas = areas,
@@ -108,15 +116,18 @@ class Repo(
                 workload = workload,
                 todos = todos,
                 rewards = rewards,
+                personalRewards = personalRewards,
                 rewardSettings = rewardSettings,
                 effortTotals = effortTotals,
+                rewardState = rewardState,
+                personalPoints = personalPoints,
+                rpsGames = rpsGames,
                 pausedUntil = household.household.pausedUntil,
                 currentUserId = jwtSub(session.token()),
                 isLoading = false,
                 error = null,
             )
         } catch (e: CancellationException) {
-            // Coroutine cancellation (e.g. app backgrounded, scope cancelled) is not a real error.
             _state.value = _state.value.copy(isLoading = false)
             throw e
         } catch (t: Throwable) {
@@ -124,4 +135,27 @@ class Repo(
         }
     }
 
+    /** Light-weight refresh that only re-pulls the data RPS/rewards screens care about. */
+    suspend fun refreshRewardsAndRps() {
+        try {
+            val rewards = runCatching { api.rewards("household") }.getOrDefault(_state.value.rewards)
+            val personalRewards = runCatching { api.rewards("personal") }.getOrDefault(_state.value.personalRewards)
+            val effortTotals = runCatching { api.effortTotals() }.getOrDefault(_state.value.effortTotals)
+            val rewardState = runCatching { api.householdRewardState() }.getOrDefault(_state.value.rewardState)
+            val personalPoints = runCatching { api.personalPoints() }.getOrDefault(_state.value.personalPoints)
+            val rpsGames = runCatching { api.rpsGames() }.getOrDefault(_state.value.rpsGames)
+            _state.value = _state.value.copy(
+                rewards = rewards,
+                personalRewards = personalRewards,
+                effortTotals = effortTotals,
+                rewardState = rewardState,
+                personalPoints = personalPoints,
+                rpsGames = rpsGames,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Best-effort; surface no error.
+        }
+    }
 }

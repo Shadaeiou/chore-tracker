@@ -212,6 +212,8 @@ data class Reward(
     val createdBy: String,
     val createdAt: Long,
     val isActive: Boolean = true,
+    val scope: String = "household",
+    val ownerId: String? = null,
 )
 
 @Serializable
@@ -219,6 +221,106 @@ data class CreateRewardRequest(
     val name: String,
     val emoji: String = "🏆",
     val effortCost: Int = 100,
+    val scope: String = "household",
+)
+
+@Serializable
+data class HouseholdRewardSelected(
+    val id: String,
+    val name: String,
+    val emoji: String,
+    val effortCost: Int,
+)
+
+@Serializable
+data class HouseholdRewardState(
+    val selectedRewardId: String? = null,
+    val selectedReward: HouseholdRewardSelected? = null,
+    val pointsBaseline: Long = 0,
+    val roundNumber: Int = 1,
+    val nextPickerId: String? = null,
+    val householdEarned: Long = 0,
+    val roundPoints: Long = 0,
+)
+
+@Serializable
+data class SelectHouseholdRewardRequest(
+    val rewardId: String? = null,
+)
+
+@Serializable
+data class HouseholdRewardWin(
+    val id: String,
+    val rewardId: String,
+    val rewardName: String,
+    val rewardEmoji: String,
+    val cost: Int,
+    val roundNumber: Int,
+    val wonAt: Long,
+    val claimedBy: String,
+)
+
+@Serializable
+data class PersonalPoints(
+    val earned: Long = 0,
+    val redeemed: Long = 0,
+    val available: Long = 0,
+)
+
+@Serializable
+data class PersonalRedemption(
+    val id: String,
+    val rewardId: String,
+    val rewardName: String,
+    val rewardEmoji: String,
+    val cost: Int,
+    val redeemedAt: Long,
+)
+
+@Serializable
+data class RedeemResponse(
+    val id: String,
+    val rewardId: String,
+    val rewardName: String,
+    val rewardEmoji: String,
+    val cost: Int,
+    val redeemedAt: Long,
+    val available: Long,
+)
+
+@Serializable
+data class RpsRound(
+    val roundNumber: Int,
+    val challengerChoice: String? = null,
+    val opponentChoice: String? = null,
+    val resolvedAt: Long? = null,
+)
+
+@Serializable
+data class RpsGame(
+    val id: String,
+    val challengerId: String,
+    val opponentId: String,
+    val challengerScore: Int = 0,
+    val opponentScore: Int = 0,
+    val currentRound: Int = 1,
+    val status: String = "in_progress",
+    val winnerId: String? = null,
+    val purpose: String = "pick_reward",
+    val createdAt: Long = 0,
+    val finishedAt: Long? = null,
+    val rounds: List<RpsRound> = emptyList(),
+)
+
+@Serializable
+data class CreateRpsGameRequest(
+    val opponentId: String,
+    val purpose: String = "pick_reward",
+)
+
+@Serializable
+data class PlayRpsRequest(
+    val choice: String,
 )
 
 @Serializable

@@ -137,6 +137,7 @@ fun HomeScreen(
     repo: Repo,
     onSignOut: () -> Unit,
     onOpenSettings: () -> Unit = {},
+    onOpenRps: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -602,6 +603,7 @@ fun HomeScreen(
                         state = visibleState,
                         repo = repo,
                         snackbarHost = snackbarHost,
+                        onOpenRps = onOpenRps,
                     )
                 }
             }

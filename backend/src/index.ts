@@ -1412,40 +1412,63 @@ app.delete("/api/todos/:id", async (c) => {
 // ---------- Rewards ----------
 
 app.get("/api/rewards", async (c) => {
-  const { hh } = c.get("user");
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, name, emoji, effort_cost AS effortCost, created_by AS createdBy,
-            created_at AS createdAt, is_active AS isActive
-       FROM rewards WHERE household_id = ? ORDER BY effort_cost ASC`,
-  ).bind(hh).all();
+  const { sub, hh } = c.get("user");
+  const scope = c.req.query("scope") ?? "household";
+  if (scope !== "household" && scope !== "personal") {
+    throw new HTTPException(400, { message: "scope must be 'household' or 'personal'" });
+  }
+  const sql = scope === "personal"
+    ? `SELECT id, name, emoji, effort_cost AS effortCost, created_by AS createdBy,
+              created_at AS createdAt, is_active AS isActive, scope, owner_id AS ownerId
+         FROM rewards WHERE household_id = ? AND scope = 'personal' AND owner_id = ?
+         ORDER BY effort_cost ASC`
+    : `SELECT id, name, emoji, effort_cost AS effortCost, created_by AS createdBy,
+              created_at AS createdAt, is_active AS isActive, scope, owner_id AS ownerId
+         FROM rewards WHERE household_id = ? AND scope = 'household'
+         ORDER BY effort_cost ASC`;
+  const stmt = scope === "personal"
+    ? c.env.DB.prepare(sql).bind(hh, sub)
+    : c.env.DB.prepare(sql).bind(hh);
+  const { results } = await stmt.all();
   return c.json(results.map((r: any) => ({ ...r, isActive: r.isActive !== 0 })));
 });
 
 app.post("/api/rewards", async (c) => {
   const { sub, hh } = c.get("user");
-  const body = await c.req.json<{ name?: string; emoji?: string; effortCost?: number }>();
+  const body = await c.req.json<{ name?: string; emoji?: string; effortCost?: number; scope?: string }>();
   const name = body.name?.trim();
   if (!name) throw new HTTPException(400, { message: "name required" });
+  const scope = body.scope ?? "household";
+  if (scope !== "household" && scope !== "personal") {
+    throw new HTTPException(400, { message: "scope must be 'household' or 'personal'" });
+  }
   const emoji = body.emoji?.trim() || "🏆";
   const effortCost = body.effortCost ?? 100;
   if (effortCost < 1) throw new HTTPException(400, { message: "effortCost must be >= 1" });
   const id = newId();
   const now = Date.now();
+  const ownerId = scope === "personal" ? sub : null;
   await c.env.DB.prepare(
-    `INSERT INTO rewards (id, household_id, name, emoji, effort_cost, created_by, created_at, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-  ).bind(id, hh, name, emoji, effortCost, sub, now).run();
-  return c.json({ id, name, emoji, effortCost, createdBy: sub, createdAt: now, isActive: true });
+    `INSERT INTO rewards (id, household_id, name, emoji, effort_cost, created_by, created_at, is_active, scope, owner_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+  ).bind(id, hh, name, emoji, effortCost, sub, now, scope, ownerId).run();
+  return c.json({
+    id, name, emoji, effortCost, createdBy: sub, createdAt: now,
+    isActive: true, scope, ownerId,
+  });
 });
 
 app.patch("/api/rewards/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const rewardId = c.req.param("id");
   const body = await c.req.json<{ name?: string; emoji?: string; effortCost?: number; isActive?: boolean }>();
   const reward = await c.env.DB.prepare(
-    `SELECT id FROM rewards WHERE id = ? AND household_id = ?`,
-  ).bind(rewardId, hh).first();
+    `SELECT id, scope, owner_id AS ownerId FROM rewards WHERE id = ? AND household_id = ?`,
+  ).bind(rewardId, hh).first<{ id: string; scope: string; ownerId: string | null }>();
   if (!reward) throw new HTTPException(404);
+  if (reward.scope === "personal" && reward.ownerId !== sub) {
+    throw new HTTPException(403, { message: "personal rewards can only be edited by their owner" });
+  }
   const sets: string[] = [];
   const bindings: unknown[] = [];
   if (body.name !== undefined) {
@@ -1453,7 +1476,10 @@ app.patch("/api/rewards/:id", async (c) => {
     sets.push("name = ?"); bindings.push(body.name.trim());
   }
   if (body.emoji !== undefined) { sets.push("emoji = ?"); bindings.push(body.emoji.trim() || "🏆"); }
-  if (body.effortCost !== undefined) { sets.push("effort_cost = ?"); bindings.push(body.effortCost); }
+  if (body.effortCost !== undefined) {
+    if (body.effortCost < 1) throw new HTTPException(400, { message: "effortCost must be >= 1" });
+    sets.push("effort_cost = ?"); bindings.push(body.effortCost);
+  }
   if (body.isActive !== undefined) { sets.push("is_active = ?"); bindings.push(body.isActive ? 1 : 0); }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
   bindings.push(rewardId);
@@ -1462,12 +1488,23 @@ app.patch("/api/rewards/:id", async (c) => {
 });
 
 app.delete("/api/rewards/:id", async (c) => {
-  const { hh } = c.get("user");
+  const { sub, hh } = c.get("user");
   const rewardId = c.req.param("id");
-  const res = await c.env.DB.prepare(
+  const reward = await c.env.DB.prepare(
+    `SELECT scope, owner_id AS ownerId FROM rewards WHERE id = ? AND household_id = ?`,
+  ).bind(rewardId, hh).first<{ scope: string; ownerId: string | null }>();
+  if (!reward) throw new HTTPException(404);
+  if (reward.scope === "personal" && reward.ownerId !== sub) {
+    throw new HTTPException(403, { message: "personal rewards can only be deleted by their owner" });
+  }
+  await c.env.DB.prepare(
     `DELETE FROM rewards WHERE id = ? AND household_id = ?`,
   ).bind(rewardId, hh).run();
-  if (!res.meta.changes) throw new HTTPException(404);
+  // If this was the household's currently selected reward, clear the selection.
+  await c.env.DB.prepare(
+    `UPDATE household_reward_state SET selected_reward_id = NULL, updated_at = ?
+       WHERE household_id = ? AND selected_reward_id = ?`,
+  ).bind(Date.now(), hh, rewardId).run();
   return c.json({ ok: true });
 });
 
@@ -1509,6 +1546,379 @@ app.get("/api/household/effort-totals", async (c) => {
       ORDER BY effortPoints DESC`,
   ).bind(hh, hh).all();
   return c.json(results);
+});
+
+// ---------- Household reward state (selected reward + round) ----------
+
+async function fetchHouseholdRewardState(c: any, hh: string) {
+  let row = await c.env.DB.prepare(
+    `SELECT selected_reward_id AS selectedRewardId,
+            points_baseline   AS pointsBaseline,
+            round_number      AS roundNumber,
+            next_picker_id    AS nextPickerId
+       FROM household_reward_state WHERE household_id = ?`,
+  ).bind(hh).first() as {
+    selectedRewardId: string | null;
+    pointsBaseline: number;
+    roundNumber: number;
+    nextPickerId: string | null;
+  } | null;
+  if (!row) {
+    await c.env.DB.prepare(
+      `INSERT INTO household_reward_state
+        (household_id, selected_reward_id, points_baseline, round_number, next_picker_id, updated_at)
+        VALUES (?, NULL, 0, 1, NULL, ?)`,
+    ).bind(hh, Date.now()).run();
+    row = { selectedRewardId: null, pointsBaseline: 0, roundNumber: 1, nextPickerId: null };
+  }
+
+  const totals = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(t.effort_points), 0) AS total
+       FROM completions c
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE a.household_id = ?`,
+  ).bind(hh).first() as { total: number } | null;
+  const householdEarned = totals?.total ?? 0;
+  const roundPoints = Math.max(0, householdEarned - row.pointsBaseline);
+
+  let selectedReward: any = null;
+  if (row.selectedRewardId) {
+    selectedReward = await c.env.DB.prepare(
+      `SELECT id, name, emoji, effort_cost AS effortCost
+         FROM rewards WHERE id = ? AND household_id = ? AND scope = 'household'`,
+    ).bind(row.selectedRewardId, hh).first();
+  }
+
+  return {
+    selectedRewardId: row.selectedRewardId,
+    selectedReward,
+    pointsBaseline: row.pointsBaseline,
+    roundNumber: row.roundNumber,
+    nextPickerId: row.nextPickerId,
+    householdEarned,
+    roundPoints,
+  };
+}
+
+app.get("/api/household/reward-state", async (c) => {
+  const { hh } = c.get("user");
+  const state = await fetchHouseholdRewardState(c, hh);
+  return c.json(state);
+});
+
+app.put("/api/household/reward-state/selection", async (c) => {
+  const { sub, hh } = c.get("user");
+  const body = await c.req.json<{ rewardId?: string | null }>();
+  const rewardId = body.rewardId ?? null;
+  if (rewardId) {
+    const reward = await c.env.DB.prepare(
+      `SELECT id FROM rewards WHERE id = ? AND household_id = ? AND scope = 'household' AND is_active = 1`,
+    ).bind(rewardId, hh).first();
+    if (!reward) throw new HTTPException(404, { message: "household reward not found" });
+  }
+  // Ensure a state row exists, then update selection.
+  await fetchHouseholdRewardState(c, hh);
+  const now = Date.now();
+  // If a next_picker_id is set, only that picker may change the selection.
+  const existing = await c.env.DB.prepare(
+    `SELECT next_picker_id AS nextPickerId FROM household_reward_state WHERE household_id = ?`,
+  ).bind(hh).first<{ nextPickerId: string | null }>();
+  if (existing?.nextPickerId && existing.nextPickerId !== sub) {
+    throw new HTTPException(403, { message: "only the designated picker may select the next reward" });
+  }
+  await c.env.DB.prepare(
+    `UPDATE household_reward_state
+        SET selected_reward_id = ?, next_picker_id = NULL, updated_at = ?
+      WHERE household_id = ?`,
+  ).bind(rewardId, now, hh).run();
+  return c.json(await fetchHouseholdRewardState(c, hh));
+});
+
+app.post("/api/household/reward-state/claim", async (c) => {
+  const { sub, hh } = c.get("user");
+  const state = await fetchHouseholdRewardState(c, hh);
+  if (!state.selectedReward) throw new HTTPException(400, { message: "no reward selected" });
+  if (state.roundPoints < state.selectedReward.effortCost) {
+    throw new HTTPException(400, { message: "not enough points to claim" });
+  }
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO household_reward_wins
+      (id, household_id, reward_id, reward_name, reward_emoji, cost, round_number, won_at, claimed_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    newId(), hh, state.selectedReward.id, state.selectedReward.name,
+    state.selectedReward.emoji, state.selectedReward.effortCost,
+    state.roundNumber, now, sub,
+  ).run();
+  // Advance: bump baseline so next round starts at the post-claim point total,
+  // clear the selection, increment round.
+  await c.env.DB.prepare(
+    `UPDATE household_reward_state
+        SET selected_reward_id = NULL,
+            points_baseline    = points_baseline + ?,
+            round_number       = round_number + 1,
+            updated_at         = ?
+      WHERE household_id = ?`,
+  ).bind(state.selectedReward.effortCost, now, hh).run();
+  return c.json(await fetchHouseholdRewardState(c, hh));
+});
+
+app.get("/api/household/reward-wins", async (c) => {
+  const { hh } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, reward_id AS rewardId, reward_name AS rewardName,
+            reward_emoji AS rewardEmoji, cost, round_number AS roundNumber,
+            won_at AS wonAt, claimed_by AS claimedBy
+       FROM household_reward_wins WHERE household_id = ?
+      ORDER BY won_at DESC LIMIT 50`,
+  ).bind(hh).all();
+  return c.json(results);
+});
+
+// ---------- Personal points & redemptions ----------
+
+app.get("/api/me/personal-points", async (c) => {
+  const { sub, hh } = c.get("user");
+  const earnedRow = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(t.effort_points), 0) AS earned
+       FROM completions c
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE c.user_id = ? AND a.household_id = ?`,
+  ).bind(sub, hh).first<{ earned: number }>();
+  const redeemedRow = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(cost), 0) AS redeemed FROM personal_redemptions WHERE user_id = ?`,
+  ).bind(sub).first<{ redeemed: number }>();
+  const earned = earnedRow?.earned ?? 0;
+  const redeemed = redeemedRow?.redeemed ?? 0;
+  return c.json({ earned, redeemed, available: earned - redeemed });
+});
+
+app.post("/api/me/redeem/:rewardId", async (c) => {
+  const { sub, hh } = c.get("user");
+  const rewardId = c.req.param("rewardId");
+  const reward = await c.env.DB.prepare(
+    `SELECT id, name, emoji, effort_cost AS effortCost, scope, owner_id AS ownerId
+       FROM rewards WHERE id = ? AND household_id = ? AND is_active = 1`,
+  ).bind(rewardId, hh).first<{
+    id: string; name: string; emoji: string; effortCost: number;
+    scope: string; ownerId: string | null;
+  }>();
+  if (!reward) throw new HTTPException(404);
+  if (reward.scope !== "personal" || reward.ownerId !== sub) {
+    throw new HTTPException(403, { message: "can only redeem your own personal rewards" });
+  }
+  const earnedRow = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(t.effort_points), 0) AS earned
+       FROM completions c
+       JOIN tasks t ON t.id = c.task_id
+       JOIN areas a ON a.id = t.area_id
+      WHERE c.user_id = ? AND a.household_id = ?`,
+  ).bind(sub, hh).first<{ earned: number }>();
+  const redeemedRow = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(cost), 0) AS redeemed FROM personal_redemptions WHERE user_id = ?`,
+  ).bind(sub).first<{ redeemed: number }>();
+  const available = (earnedRow?.earned ?? 0) - (redeemedRow?.redeemed ?? 0);
+  if (available < reward.effortCost) {
+    throw new HTTPException(400, { message: "not enough personal points" });
+  }
+  const id = newId();
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO personal_redemptions
+      (id, user_id, household_id, reward_id, reward_name, reward_emoji, cost, redeemed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, sub, hh, reward.id, reward.name, reward.emoji, reward.effortCost, now).run();
+  return c.json({
+    id, rewardId: reward.id, rewardName: reward.name,
+    rewardEmoji: reward.emoji, cost: reward.effortCost, redeemedAt: now,
+    available: available - reward.effortCost,
+  });
+});
+
+app.get("/api/me/redemptions", async (c) => {
+  const { sub } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, reward_id AS rewardId, reward_name AS rewardName,
+            reward_emoji AS rewardEmoji, cost, redeemed_at AS redeemedAt
+       FROM personal_redemptions WHERE user_id = ?
+      ORDER BY redeemed_at DESC LIMIT 50`,
+  ).bind(sub).all();
+  return c.json(results);
+});
+
+// ---------- Rock-Paper-Scissors games ----------
+
+const RPS_CHOICES = new Set(["rock", "paper", "scissors"]);
+
+function rpsRoundWinner(a: string, b: string): "a" | "b" | "tie" {
+  if (a === b) return "tie";
+  if ((a === "rock" && b === "scissors") ||
+      (a === "paper" && b === "rock") ||
+      (a === "scissors" && b === "paper")) return "a";
+  return "b";
+}
+
+async function loadRpsGame(c: any, hh: string, gameId: string) {
+  const game = await c.env.DB.prepare(
+    `SELECT id, household_id AS householdId, purpose,
+            challenger_id AS challengerId, opponent_id AS opponentId,
+            challenger_score AS challengerScore, opponent_score AS opponentScore,
+            current_round AS currentRound, status, winner_id AS winnerId,
+            created_at AS createdAt, finished_at AS finishedAt
+       FROM rps_games WHERE id = ? AND household_id = ?`,
+  ).bind(gameId, hh).first() as any;
+  if (!game) return null;
+  const { results: rounds } = await c.env.DB.prepare(
+    `SELECT round_number AS roundNumber,
+            challenger_choice AS challengerChoice,
+            opponent_choice   AS opponentChoice,
+            resolved_at       AS resolvedAt
+       FROM rps_rounds WHERE game_id = ? ORDER BY round_number ASC`,
+  ).bind(gameId).all();
+  return { ...game, rounds };
+}
+
+function maskRpsForViewer(game: any, viewerId: string) {
+  // Hide the other player's choice for unresolved rounds.
+  const isChallenger = game.challengerId === viewerId;
+  const rounds = (game.rounds ?? []).map((r: any) => {
+    if (r.resolvedAt) return r;
+    return {
+      ...r,
+      challengerChoice: isChallenger ? r.challengerChoice : (r.challengerChoice ? "submitted" : null),
+      opponentChoice: !isChallenger ? r.opponentChoice : (r.opponentChoice ? "submitted" : null),
+    };
+  });
+  return { ...game, rounds };
+}
+
+app.get("/api/rps/games", async (c) => {
+  const { sub, hh } = c.get("user");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, challenger_id AS challengerId, opponent_id AS opponentId,
+            challenger_score AS challengerScore, opponent_score AS opponentScore,
+            current_round AS currentRound, status, winner_id AS winnerId,
+            purpose, created_at AS createdAt, finished_at AS finishedAt
+       FROM rps_games
+      WHERE household_id = ? AND (challenger_id = ? OR opponent_id = ?)
+      ORDER BY (CASE WHEN status = 'in_progress' THEN 0 ELSE 1 END), created_at DESC
+      LIMIT 25`,
+  ).bind(hh, sub, sub).all();
+  return c.json(results);
+});
+
+app.post("/api/rps/games", async (c) => {
+  const { sub, hh } = c.get("user");
+  const body = await c.req.json<{ opponentId?: string; purpose?: string }>();
+  const opponentId = body.opponentId?.trim();
+  if (!opponentId) throw new HTTPException(400, { message: "opponentId required" });
+  if (opponentId === sub) throw new HTTPException(400, { message: "cannot challenge yourself" });
+  const opp = await c.env.DB.prepare(
+    `SELECT id FROM users WHERE id = ? AND household_id = ?`,
+  ).bind(opponentId, hh).first();
+  if (!opp) throw new HTTPException(404, { message: "opponent not in household" });
+  const id = newId();
+  const now = Date.now();
+  const purpose = body.purpose?.trim() || "pick_reward";
+  await c.env.DB.prepare(
+    `INSERT INTO rps_games
+      (id, household_id, purpose, challenger_id, opponent_id,
+       challenger_score, opponent_score, current_round, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, 0, 1, 'in_progress', ?)`,
+  ).bind(id, hh, purpose, sub, opponentId, now).run();
+  await c.env.DB.prepare(
+    `INSERT INTO rps_rounds (game_id, round_number) VALUES (?, 1)`,
+  ).bind(id).run();
+  const game = await loadRpsGame(c, hh, id);
+  return c.json(maskRpsForViewer(game, sub));
+});
+
+app.get("/api/rps/games/:id", async (c) => {
+  const { sub, hh } = c.get("user");
+  const game = await loadRpsGame(c, hh, c.req.param("id"));
+  if (!game) throw new HTTPException(404);
+  if (game.challengerId !== sub && game.opponentId !== sub) throw new HTTPException(403);
+  return c.json(maskRpsForViewer(game, sub));
+});
+
+app.post("/api/rps/games/:id/play", async (c) => {
+  const { sub, hh } = c.get("user");
+  const gameId = c.req.param("id");
+  const body = await c.req.json<{ choice?: string }>();
+  const choice = body.choice?.trim().toLowerCase() ?? "";
+  if (!RPS_CHOICES.has(choice)) {
+    throw new HTTPException(400, { message: "choice must be rock|paper|scissors" });
+  }
+  const game = await loadRpsGame(c, hh, gameId);
+  if (!game) throw new HTTPException(404);
+  if (game.challengerId !== sub && game.opponentId !== sub) throw new HTTPException(403);
+  if (game.status !== "in_progress") throw new HTTPException(400, { message: "game finished" });
+
+  const isChallenger = game.challengerId === sub;
+  const round = (game.rounds ?? []).find((r: any) => r.roundNumber === game.currentRound);
+  if (!round) throw new HTTPException(500, { message: "round missing" });
+  if (isChallenger && round.challengerChoice) {
+    throw new HTTPException(400, { message: "already played this round" });
+  }
+  if (!isChallenger && round.opponentChoice) {
+    throw new HTTPException(400, { message: "already played this round" });
+  }
+
+  await c.env.DB.prepare(
+    isChallenger
+      ? `UPDATE rps_rounds SET challenger_choice = ? WHERE game_id = ? AND round_number = ?`
+      : `UPDATE rps_rounds SET opponent_choice = ? WHERE game_id = ? AND round_number = ?`,
+  ).bind(choice, gameId, game.currentRound).run();
+
+  // Reload round; if both players have submitted, resolve it.
+  const fresh = await c.env.DB.prepare(
+    `SELECT challenger_choice AS challengerChoice, opponent_choice AS opponentChoice
+       FROM rps_rounds WHERE game_id = ? AND round_number = ?`,
+  ).bind(gameId, game.currentRound).first<{ challengerChoice: string; opponentChoice: string }>();
+  if (fresh?.challengerChoice && fresh.opponentChoice) {
+    const winner = rpsRoundWinner(fresh.challengerChoice, fresh.opponentChoice);
+    let challengerScore = game.challengerScore;
+    let opponentScore = game.opponentScore;
+    if (winner === "a") challengerScore += 1;
+    else if (winner === "b") opponentScore += 1;
+    const now = Date.now();
+    await c.env.DB.prepare(
+      `UPDATE rps_rounds SET resolved_at = ? WHERE game_id = ? AND round_number = ?`,
+    ).bind(now, gameId, game.currentRound).run();
+
+    // Best of 3: first to 2 wins. Otherwise advance round.
+    if (challengerScore >= 2 || opponentScore >= 2) {
+      const winnerId = challengerScore >= 2 ? game.challengerId : game.opponentId;
+      await c.env.DB.prepare(
+        `UPDATE rps_games SET challenger_score = ?, opponent_score = ?,
+                              status = 'finished', winner_id = ?, finished_at = ?
+          WHERE id = ?`,
+      ).bind(challengerScore, opponentScore, winnerId, now, gameId).run();
+      // If this RPS was for picking the reward, set the winner as next picker.
+      if (game.purpose === "pick_reward") {
+        await fetchHouseholdRewardState(c, hh);
+        await c.env.DB.prepare(
+          `UPDATE household_reward_state SET next_picker_id = ?, updated_at = ?
+            WHERE household_id = ?`,
+        ).bind(winnerId, now, hh).run();
+      }
+    } else {
+      const nextRound = game.currentRound + 1;
+      await c.env.DB.prepare(
+        `UPDATE rps_games SET challenger_score = ?, opponent_score = ?, current_round = ?
+           WHERE id = ?`,
+      ).bind(challengerScore, opponentScore, nextRound, gameId).run();
+      await c.env.DB.prepare(
+        `INSERT INTO rps_rounds (game_id, round_number) VALUES (?, ?)`,
+      ).bind(gameId, nextRound).run();
+    }
+  }
+
+  const updated = await loadRpsGame(c, hh, gameId);
+  return c.json(maskRpsForViewer(updated, sub));
 });
 
 // ---------- Error handler ----------
