@@ -1480,7 +1480,7 @@ app.patch("/api/rewards/:id", async (c) => {
     if (body.effortCost < 1) throw new HTTPException(400, { message: "effortCost must be >= 1" });
     sets.push("effort_cost = ?"); bindings.push(body.effortCost);
   }
-  if (body.isActive !== undefined) { sets.push("is_active = ?"); bindings.push(body.isActive ? 1 : 0); }
+  if (body.isActive !== undefined && body.isActive !== null) { sets.push("is_active = ?"); bindings.push(body.isActive ? 1 : 0); }
   if (sets.length === 0) throw new HTTPException(400, { message: "nothing to update" });
   bindings.push(rewardId);
   await c.env.DB.prepare(`UPDATE rewards SET ${sets.join(", ")} WHERE id = ?`).bind(...bindings).run();

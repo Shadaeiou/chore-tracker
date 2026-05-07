@@ -91,7 +91,7 @@ fun RpsScreen(repo: Repo, onBack: () -> Unit) {
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Rock · Paper · Scissors", fontFamily = FontFamily.Monospace) },
+                title = { Text("🪨  📄  ✂️", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = {
                         if (mode == RpsScreenMode.LOBBY) onBack()
@@ -725,9 +725,9 @@ private fun PixelSprite(
 
 private val ROCK_PALETTE = mapOf(
     '.' to Color.Transparent,
-    '#' to Color(0xFF6D4C41),
-    '*' to Color(0xFF4E342E),
-    'o' to Color(0xFF8D6E63),
+    '#' to Color(0xFF757575),
+    '*' to Color(0xFF424242),
+    'o' to Color(0xFFBDBDBD),
 )
 private val ROCK_GRID = listOf(
     "............",
@@ -767,22 +767,20 @@ private val PAPER_GRID = listOf(
 
 private val SCISSORS_PALETTE = mapOf(
     '.' to Color.Transparent,
-    '#' to Color(0xFF90A4AE),
-    '*' to Color(0xFF455A64),
-    'o' to Color(0xFFF44336),
-    'b' to Color(0xFF1E88E5),
+    '#' to Color(0xFFB0BEC5),
+    'o' to Color(0xFFD4A054),
 )
 private val SCISSORS_GRID = listOf(
-    "............",
-    ".oo......bb.",
-    ".oo......bb.",
-    "..oo....bb..",
-    "...oo..bb...",
-    "....oobb....",
+    "##........##",
+    ".##......##.",
+    "..##....##..",
+    "...##..##...",
     "....####....",
-    "...##**##...",
-    "..##*##*##..",
-    ".##*#**#*##.",
-    "##**######**",
+    "...##..##...",
+    "...##..##...",
+    ".ooo....ooo.",
+    "o..o....o..o",
+    "o..o....o..o",
+    ".ooo....ooo.",
     "............",
 )
