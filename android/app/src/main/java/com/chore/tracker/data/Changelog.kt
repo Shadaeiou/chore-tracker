@@ -12,23 +12,43 @@ data class ReleaseNote(
  * shows expanded by default in Settings. Add a new entry at the top of
  * the list whenever you ship a meaningful change worth surfacing to users.
  *
- * Version numbers match the auto-incrementing build versionCode (= git
- * commit count on main), so each entry corresponds to a real release tag.
+ * Version numbers must match the actual versionCode shown in the
+ * installed APK (= the v<name>+<code> tag the build workflow publishes).
+ * Note that this number runs ~11 ahead of `git rev-list --count HEAD`
+ * because of orphaned commits in the runner's git tree from earlier
+ * force-pushes; always look at the most recent release tag (or
+ * BuildConfig.VERSION_NAME) before adding an entry, not your local
+ * commit count.
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
-        version = "0.1.81",
+        version = "0.1.97",
         date = "2026-05-07",
         bullets = listOf(
-            "Rewards now have two pools: shared Household rewards and your own Personal rewards — every effort point you earn lands in both",
-            "Pick a Household reward as the round goal; when the shared pool reaches its cost, claim it as a household win and start a new round",
-            "Personal rewards are private — spend your individual point balance to redeem your own rewards anytime you have enough",
-            "Any household member can add and edit Household rewards (name, emoji, points)",
-            "New rock-paper-scissors mini-game in pixel art — best of 3 between household members; winner gets to pick the next household reward",
+            "Subtler overdue task styling on the Today tab",
+            "Less-sensitive swipe so you don't trigger complete or snooze while scrolling",
+            "Smaller household search bar that takes less screen real estate",
+            "Quick-access RPS mini-game button uses an emoji icon",
         ),
     ),
     ReleaseNote(
-        version = "0.1.80",
+        version = "0.1.94",
+        date = "2026-05-07",
+        bullets = listOf(
+            "Fix reward edit dialog disappearing before you could save",
+            "Pixel-art polish on the rock-paper-scissors mini-game",
+        ),
+    ),
+    ReleaseNote(
+        version = "0.1.93",
+        date = "2026-05-07",
+        bullets = listOf(
+            "Rewards split into two pools — household-shared and personal — so you can track individual goals separately from group ones",
+            "Pixel-art rock-paper-scissors mini-game built into the app; winner picks the next household reward",
+        ),
+    ),
+    ReleaseNote(
+        version = "0.1.91",
         date = "2026-05-07",
         bullets = listOf(
             "Rewards now share one household pool — points from every member count toward the same goal",
@@ -37,7 +57,7 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.77",
+        version = "0.1.88",
         date = "2026-05-06",
         bullets = listOf(
             "New Rewards tab — earn effort points from chores, redeem against household-defined rewards, or pick from suggested ones",
@@ -46,21 +66,21 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.76",
+        version = "0.1.87",
         date = "2026-04-30",
         bullets = listOf(
             "Push notification when someone reacts to one of your completed activities",
         ),
     ),
     ReleaseNote(
-        version = "0.1.75",
+        version = "0.1.86",
         date = "2026-04-30",
         bullets = listOf(
             "Update notification now fires the moment a new release is published — no 24-hour wait",
         ),
     ),
     ReleaseNote(
-        version = "0.1.74",
+        version = "0.1.85",
         date = "2026-04-30",
         bullets = listOf(
             "Tap a chore on Today to see its notes and reassign it in one dialog",
@@ -68,14 +88,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.73",
+        version = "0.1.84",
         date = "2026-04-30",
         bullets = listOf(
             "Comment notifications now have inline Reply and 👍 React actions — answer right from the notification shade without opening the app",
         ),
     ),
     ReleaseNote(
-        version = "0.1.72",
+        version = "0.1.83",
         date = "2026-04-30",
         bullets = listOf(
             "React with an emoji or comment on completed activities — tap any row on the Activity tab to open the thread",
@@ -85,35 +105,35 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.71",
+        version = "0.1.82",
         date = "2026-04-29",
         bullets = listOf(
             "Snoozing a chore now keeps its recurring schedule on track. If trash is normally Thursday and you snooze a day for a holiday pickup, completing it on Friday still anchors the next due to the following Thursday rather than shifting to a Friday cadence forever.",
         ),
     ),
     ReleaseNote(
-        version = "0.1.67",
+        version = "0.1.78",
         date = "2026-04-29",
         bullets = listOf(
             "Compact area sort screen with send-to-top and send-to-bottom arrows for quick reordering",
         ),
     ),
     ReleaseNote(
-        version = "0.1.66",
+        version = "0.1.77",
         date = "2026-04-29",
         bullets = listOf(
             "Area ordering is now per-device — each housemate can lay out their list however they like without affecting anyone else",
         ),
     ),
     ReleaseNote(
-        version = "0.1.65",
+        version = "0.1.76",
         date = "2026-04-29",
         bullets = listOf(
             "Changelog section in Settings (this list) — see what shipped recently, expand for full history",
         ),
     ),
     ReleaseNote(
-        version = "0.1.64",
+        version = "0.1.75",
         date = "2026-04-29",
         bullets = listOf(
             "Tap any chore on Today to reassign it to a household member",
@@ -122,28 +142,28 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.62",
+        version = "0.1.73",
         date = "2026-04-29",
         bullets = listOf(
             "Today tab now shows each housemate's today list (chores + public reminders)",
         ),
     ),
     ReleaseNote(
-        version = "0.1.60",
+        version = "0.1.71",
         date = "2026-04-28",
         bullets = listOf(
             "Household roles: admins can remove other members from Settings",
         ),
     ),
     ReleaseNote(
-        version = "0.1.59",
+        version = "0.1.70",
         date = "2026-04-28",
         bullets = listOf(
             "10-second undo snackbar when deleting a chore or area",
         ),
     ),
     ReleaseNote(
-        version = "0.1.58",
+        version = "0.1.69",
         date = "2026-04-28",
         bullets = listOf(
             "À la carte daily reminders, public or private, on the Today tab",
@@ -152,28 +172,28 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.57",
+        version = "0.1.68",
         date = "2026-04-28",
         bullets = listOf(
             "On-demand chores rotate through the household without a fixed schedule",
         ),
     ),
     ReleaseNote(
-        version = "0.1.55",
+        version = "0.1.66",
         date = "2026-04-28",
         bullets = listOf(
             "Avatars cached per user, only fetched when their version bumps",
         ),
     ),
     ReleaseNote(
-        version = "0.1.54",
+        version = "0.1.65",
         date = "2026-04-28",
         bullets = listOf(
             "User profile editing — change your display name, upload a photo",
         ),
     ),
     ReleaseNote(
-        version = "0.1.53",
+        version = "0.1.64",
         date = "2026-04-28",
         bullets = listOf(
             "Drag handles to reorder areas on the Household tab",
@@ -181,14 +201,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.51",
+        version = "0.1.62",
         date = "2026-04-28",
         bullets = listOf(
             "Household search supports @user, 7d, notes, yesterday filters",
         ),
     ),
     ReleaseNote(
-        version = "0.1.46",
+        version = "0.1.57",
         date = "2026-04-28",
         bullets = listOf(
             "Rebrand: app name and launcher icon are now the sock motif",
@@ -196,28 +216,28 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.45",
+        version = "0.1.56",
         date = "2026-04-28",
         bullets = listOf(
             "Other devices in your household now stay in sync silently — no more polling",
         ),
     ),
     ReleaseNote(
-        version = "0.1.44",
+        version = "0.1.55",
         date = "2026-04-28",
         bullets = listOf(
             "Release builds are signed with a stable keystore so updates can chain across builds",
         ),
     ),
     ReleaseNote(
-        version = "0.1.43",
+        version = "0.1.54",
         date = "2026-04-28",
         bullets = listOf(
             "Auto-updater bootstrap: opt in from Settings to be told about new builds",
         ),
     ),
     ReleaseNote(
-        version = "0.1.42",
+        version = "0.1.53",
         date = "2026-04-28",
         bullets = listOf(
             "Multiple theme palettes to pick from in Settings",
@@ -225,14 +245,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.41",
+        version = "0.1.52",
         date = "2026-04-28",
         bullets = listOf(
             "Move invite to the household menu, vacation mode + indicators consolidated under Settings",
         ),
     ),
     ReleaseNote(
-        version = "0.1.40",
+        version = "0.1.51",
         date = "2026-04-28",
         bullets = listOf(
             "Tap-to-view notes on Today tab",
@@ -240,7 +260,7 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.38",
+        version = "0.1.49",
         date = "2026-04-28",
         bullets = listOf(
             "Rounded task rows with tag chips for area / frequency / assignee / notes",
@@ -248,7 +268,7 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.37",
+        version = "0.1.48",
         date = "2026-04-28",
         bullets = listOf(
             "Task and activity rows redesigned for clarity",
@@ -256,14 +276,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.36",
+        version = "0.1.47",
         date = "2026-04-28",
         bullets = listOf(
             "Backdate a completion to any past day, not just within the task's lifetime",
         ),
     ),
     ReleaseNote(
-        version = "0.1.35",
+        version = "0.1.46",
         date = "2026-04-28",
         bullets = listOf(
             "Swipe-driven task UX: swipe right to complete, swipe left to snooze or delete",
@@ -271,14 +291,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.34",
+        version = "0.1.45",
         date = "2026-04-28",
         bullets = listOf(
             "Log a completion on behalf of someone else in the household",
         ),
     ),
     ReleaseNote(
-        version = "0.1.32",
+        version = "0.1.43",
         date = "2026-04-28",
         bullets = listOf(
             "Notes on tasks and per-completion notes",
@@ -286,7 +306,7 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.30",
+        version = "0.1.41",
         date = "2026-04-28",
         bullets = listOf(
             "Mass-select areas to delete in bulk",
@@ -294,14 +314,14 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.29",
+        version = "0.1.40",
         date = "2026-04-28",
         bullets = listOf(
             "Rename and copy areas, mass-delete tasks, add many tasks at once from the library",
         ),
     ),
     ReleaseNote(
-        version = "0.1.28",
+        version = "0.1.39",
         date = "2026-04-28",
         bullets = listOf(
             "Tab refresh: Today / Household / Activity, with workload moved to its own panel",
@@ -309,56 +329,56 @@ val CHANGELOG: List<ReleaseNote> = listOf(
         ),
     ),
     ReleaseNote(
-        version = "0.1.27",
+        version = "0.1.38",
         date = "2026-04-28",
         bullets = listOf(
             "Invite codes are now copyable and shareable from the household menu",
         ),
     ),
     ReleaseNote(
-        version = "0.1.24",
+        version = "0.1.35",
         date = "2026-04-28",
         bullets = listOf(
             "Template library expanded beyond cleaning chores — yard, car, kids, pets, finances, and more",
         ),
     ),
     ReleaseNote(
-        version = "0.1.22",
+        version = "0.1.33",
         date = "2026-04-28",
         bullets = listOf(
             "Long-press an activity row to undo any past completion",
         ),
     ),
     ReleaseNote(
-        version = "0.1.21",
+        version = "0.1.32",
         date = "2026-04-27",
         bullets = listOf(
             "Phase 5: starter template library and onboarding wizard for new households",
         ),
     ),
     ReleaseNote(
-        version = "0.1.20",
+        version = "0.1.31",
         date = "2026-04-27",
         bullets = listOf(
             "Phase 4: vacation mode (pause the household), per-task snooze, retroactive completion",
         ),
     ),
     ReleaseNote(
-        version = "0.1.17",
+        version = "0.1.28",
         date = "2026-04-27",
         bullets = listOf(
             "Settings now shows the running version + build number; versionCode auto-increments per push",
         ),
     ),
     ReleaseNote(
-        version = "0.1.16",
+        version = "0.1.27",
         date = "2026-04-27",
         bullets = listOf(
             "Edit and delete existing tasks and areas",
         ),
     ),
     ReleaseNote(
-        version = "0.1.4",
+        version = "0.1.15",
         date = "2026-04-27",
         bullets = listOf(
             "Phase 3: FCM push notifications when household members complete chores",
