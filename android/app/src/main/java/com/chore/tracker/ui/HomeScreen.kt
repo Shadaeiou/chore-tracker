@@ -2086,7 +2086,7 @@ private fun TaskRow(
                 SwipeToDismissBoxValue.Settled -> false
             }
         },
-        positionalThreshold = { distance -> distance * 0.5f },
+        positionalThreshold = { distance -> distance * 0.75f },
     )
     val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     val snoozed = task.snoozedUntil != null && task.snoozedUntil > now
