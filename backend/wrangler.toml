@@ -10,6 +10,9 @@ database_name = "chore_tracker"
 database_id = "a37ef031-ce55-4a72-bd2f-cd95aabb3921"
 migrations_dir = "migrations"
 
+[triggers]
+crons = ["* * * * *"]
+
 # JWT signing secret. Set with: wrangler secret put JWT_SECRET
 # Local dev: create a .dev.vars file with JWT_SECRET="some-long-random-string"
 [vars]

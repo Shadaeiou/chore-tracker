@@ -195,6 +195,12 @@ interface ChoreApi {
 
     @POST("api/rps/games/{id}/play")
     suspend fun playRps(@Path("id") id: String, @Body req: PlayRpsRequest): RpsGame
+
+    @GET("api/me/digest-preferences")
+    suspend fun getDigestPreferences(): DigestPreferences
+
+    @PUT("api/me/digest-preferences")
+    suspend fun putDigestPreferences(@Body req: PutDigestPreferencesRequest): DigestPreferences
 }
 
 object ApiFactory {

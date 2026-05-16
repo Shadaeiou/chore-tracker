@@ -1959,3 +1959,76 @@ describe("retroactive completion (POST /api/tasks/:id/complete with at)", () => 
     expect(afterSecond.find((t) => t.id === taskId)?.lastDoneAt).toBe(firstDoneAt);
   });
 });
+
+describe("GET/PUT /api/me/digest-preferences", () => {
+  it("returns defaults when no prefs saved", async () => {
+    const { token } = await register();
+    const res = await api("/api/me/digest-preferences", { token });
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.enabled).toBe(false);
+    expect(body.daysOfWeek).toEqual([]);
+    expect(body.hour).toBe(8);
+    expect(body.minute).toBe(0);
+    expect(body.includeOverdue).toBe(true);
+  });
+
+  it("saves and returns updated prefs", async () => {
+    const { token } = await register();
+    const put = await api("/api/me/digest-preferences", {
+      method: "PUT", token,
+      body: JSON.stringify({ enabled: true, daysOfWeek: [1, 3, 5], hour: 7, minute: 30, timezone: "America/New_York", includeOverdue: false }),
+    });
+    expect(put.status).toBe(200);
+    const saved = await put.json() as Record<string, unknown>;
+    expect(saved.enabled).toBe(true);
+    expect(saved.daysOfWeek).toEqual([1, 3, 5]);
+    expect(saved.hour).toBe(7);
+    expect(saved.minute).toBe(30);
+    expect(saved.timezone).toBe("America/New_York");
+    expect(saved.includeOverdue).toBe(false);
+
+    const get = await api("/api/me/digest-preferences", { token });
+    const fetched = await get.json() as Record<string, unknown>;
+    expect(fetched.enabled).toBe(true);
+    expect(fetched.daysOfWeek).toEqual([1, 3, 5]);
+    expect(fetched.hour).toBe(7);
+    expect(fetched.minute).toBe(30);
+    expect(fetched.includeOverdue).toBe(false);
+  });
+
+  it("rejects invalid hour", async () => {
+    const { token } = await register();
+    const res = await api("/api/me/digest-preferences", {
+      method: "PUT", token,
+      body: JSON.stringify({ enabled: true, daysOfWeek: [], hour: 25, minute: 0, timezone: "UTC", includeOverdue: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects invalid minute", async () => {
+    const { token } = await register();
+    const res = await api("/api/me/digest-preferences", {
+      method: "PUT", token,
+      body: JSON.stringify({ enabled: true, daysOfWeek: [], hour: 8, minute: 60, timezone: "UTC", includeOverdue: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects invalid daysOfWeek values", async () => {
+    const { token } = await register();
+    const res = await api("/api/me/digest-preferences", {
+      method: "PUT", token,
+      body: JSON.stringify({ enabled: true, daysOfWeek: [7], hour: 8, minute: 0, timezone: "UTC", includeOverdue: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("requires auth", async () => {
+    const res = await api("/api/me/digest-preferences");
+    expect(res.status).toBe(401);
+    const put = await api("/api/me/digest-preferences", { method: "PUT", body: JSON.stringify({}) });
+    expect(put.status).toBe(401);
+  });
+});
+

@@ -22,6 +22,15 @@ data class ReleaseNote(
  */
 val CHANGELOG: List<ReleaseNote> = listOf(
     ReleaseNote(
+        version = "0.1.62",
+        date = "2026-05-16",
+        bullets = listOf(
+            "Daily digest notifications — get a push at your chosen time listing chores assigned to you that are due",
+            "Choose which days of the week to receive the digest and what time (uses your device's local timezone)",
+            "Option to include overdue tasks (those that missed a previous cycle) in the digest",
+        ),
+    ),
+    ReleaseNote(
         version = "0.1.97",
         date = "2026-05-07",
         bullets = listOf(

@@ -387,3 +387,23 @@ fun Task.dirtiness(now: Long = System.currentTimeMillis()): Double {
     if (window <= 0) return 1.0
     return (now - last).toDouble() / window.toDouble()
 }
+
+@Serializable
+data class DigestPreferences(
+    val enabled: Boolean = false,
+    val daysOfWeek: List<Int> = emptyList(),
+    val hour: Int = 8,
+    val minute: Int = 0,
+    val timezone: String = "UTC",
+    val includeOverdue: Boolean = true,
+)
+
+@Serializable
+data class PutDigestPreferencesRequest(
+    val enabled: Boolean,
+    val daysOfWeek: List<Int>,
+    val hour: Int,
+    val minute: Int,
+    val timezone: String,
+    val includeOverdue: Boolean,
+)

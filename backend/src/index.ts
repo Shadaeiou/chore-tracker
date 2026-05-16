@@ -1965,6 +1965,68 @@ app.post("/api/rps/games/:id/play", async (c) => {
   return c.json(maskRpsForViewer(updated, sub));
 });
 
+// ---------- Digest preferences ----------
+
+app.get("/api/me/digest-preferences", async (c) => {
+  const { sub } = c.get("user");
+  const row = await c.env.DB.prepare(
+    `SELECT enabled, days_of_week AS daysOfWeek, hour, minute, timezone, include_overdue AS includeOverdue
+       FROM digest_preferences WHERE user_id = ?`,
+  ).bind(sub).first<{
+    enabled: number; daysOfWeek: string; hour: number;
+    minute: number; timezone: string; includeOverdue: number;
+  }>();
+  if (!row) {
+    return c.json({ enabled: false, daysOfWeek: [], hour: 8, minute: 0, timezone: "UTC", includeOverdue: true });
+  }
+  return c.json({
+    enabled: row.enabled !== 0,
+    daysOfWeek: JSON.parse(row.daysOfWeek) as number[],
+    hour: row.hour,
+    minute: row.minute,
+    timezone: row.timezone,
+    includeOverdue: row.includeOverdue !== 0,
+  });
+});
+
+app.put("/api/me/digest-preferences", async (c) => {
+  const { sub } = c.get("user");
+  const body = await c.req.json<{
+    enabled?: boolean;
+    daysOfWeek?: number[];
+    hour?: number;
+    minute?: number;
+    timezone?: string;
+    includeOverdue?: boolean;
+  }>();
+  const enabled = body.enabled ?? false;
+  const daysOfWeek = body.daysOfWeek ?? [];
+  const hour = body.hour ?? 8;
+  const minute = body.minute ?? 0;
+  const timezone = body.timezone ?? "UTC";
+  const includeOverdue = body.includeOverdue ?? true;
+
+  if (hour < 0 || hour > 23) throw new HTTPException(400, { message: "hour must be 0-23" });
+  if (minute < 0 || minute > 59) throw new HTTPException(400, { message: "minute must be 0-59" });
+  if (!Array.isArray(daysOfWeek) || daysOfWeek.some((d) => typeof d !== "number" || d < 0 || d > 6)) {
+    throw new HTTPException(400, { message: "daysOfWeek must be array of integers 0-6" });
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO digest_preferences (user_id, enabled, days_of_week, hour, minute, timezone, include_overdue)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         enabled = excluded.enabled,
+         days_of_week = excluded.days_of_week,
+         hour = excluded.hour,
+         minute = excluded.minute,
+         timezone = excluded.timezone,
+         include_overdue = excluded.include_overdue`,
+  ).bind(sub, enabled ? 1 : 0, JSON.stringify(daysOfWeek), hour, minute, timezone, includeOverdue ? 1 : 0).run();
+
+  return c.json({ enabled, daysOfWeek, hour, minute, timezone, includeOverdue });
+});
+
 // ---------- Error handler ----------
 
 app.onError((err, c) => {
@@ -1973,4 +2035,131 @@ app.onError((err, c) => {
   return c.json({ error: "internal error" }, 500);
 });
 
-export default app;
+// ---------- Digest scheduled handler ----------
+
+/** Convert a UTC Date to local time parts in the given IANA timezone. */
+function localTimeParts(now: Date, timezone: string): {
+  hour: number; minute: number; day: number; dateStr: string;
+} {
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", weekday: "long",
+      hour12: false,
+    });
+    const parts = Object.fromEntries(dtf.formatToParts(now).map((p) => [p.type, p.value]));
+    const hour = parseInt(parts.hour) % 24; // "24" can appear for midnight in some locales
+    const minute = parseInt(parts.minute);
+    const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+    const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const day = weekdays.indexOf(parts.weekday);
+    return { hour, minute, day, dateStr };
+  } catch {
+    // Fall back to UTC if timezone is invalid.
+    return {
+      hour: now.getUTCHours(),
+      minute: now.getUTCMinutes(),
+      day: now.getUTCDay(),
+      dateStr: now.toISOString().slice(0, 10),
+    };
+  }
+}
+
+export default {
+  fetch: app.fetch,
+
+  async scheduled(
+    _event: { scheduledTime: number },
+    env: Bindings,
+    ctx: { waitUntil: (p: Promise<unknown>) => void },
+  ): Promise<void> {
+    if (!env.FCM_SERVICE_ACCOUNT) return;
+
+    const now = new Date();
+
+    // Pull all enabled digest preference rows (small table — full scan is fine).
+    const { results: prefs } = await env.DB.prepare(
+      `SELECT dp.user_id, dp.days_of_week AS daysOfWeek, dp.hour, dp.minute,
+              dp.timezone, dp.include_overdue AS includeOverdue,
+              dp.last_sent_date AS lastSentDate, u.household_id AS householdId
+         FROM digest_preferences dp
+         JOIN users u ON u.id = dp.user_id
+        WHERE dp.enabled = 1`,
+    ).all<{
+      user_id: string; daysOfWeek: string; hour: number; minute: number;
+      timezone: string; includeOverdue: number; lastSentDate: string | null;
+      householdId: string;
+    }>();
+
+    const dayMs = 86_400_000;
+    const nowMs = now.getTime();
+
+    for (const pref of prefs) {
+      const local = localTimeParts(now, pref.timezone);
+      if (local.hour !== pref.hour || local.minute !== pref.minute) continue;
+
+      const days: number[] = JSON.parse(pref.daysOfWeek);
+      if (!days.includes(local.day)) continue;
+
+      // Deduplicate: only send once per local calendar day.
+      if (pref.lastSentDate === local.dateStr) continue;
+
+      const includeOverdue = pref.includeOverdue !== 0;
+
+      // Fetch tasks assigned to this user that are due or overdue.
+      const { results: tasks } = await env.DB.prepare(
+        `SELECT t.name, t.frequency_days AS frequencyDays, t.last_done_at AS lastDoneAt
+           FROM tasks t
+           JOIN areas a ON a.id = t.area_id
+          WHERE a.household_id = ?
+            AND t.assigned_to = ?
+            AND (t.on_demand IS NULL OR t.on_demand = 0)
+            AND (t.snoozed_until IS NULL OR t.snoozed_until <= ?)`,
+      ).bind(pref.householdId, pref.user_id, nowMs).all<{
+        name: string; frequencyDays: number; lastDoneAt: number | null;
+      }>();
+
+      const due: string[] = [];
+      const overdue: string[] = [];
+
+      for (const t of tasks) {
+        const window = t.frequencyDays * dayMs;
+        if (t.lastDoneAt == null) {
+          overdue.push(t.name);
+          continue;
+        }
+        const dueness = window > 0 ? (nowMs - t.lastDoneAt) / window : 1.0;
+        if (dueness >= 1.0 && dueness < 2.0) {
+          due.push(t.name);
+        } else if (dueness >= 2.0) {
+          overdue.push(t.name);
+        }
+      }
+
+      const all = includeOverdue ? [...due, ...overdue] : due;
+
+      // Mark sent regardless of whether there are tasks (skip tomorrow's re-check).
+      await env.DB.prepare(
+        `UPDATE digest_preferences SET last_sent_date = ? WHERE user_id = ?`,
+      ).bind(local.dateStr, pref.user_id).run();
+
+      if (all.length === 0) continue;
+
+      const { results: tokenRows } = await env.DB.prepare(
+        `SELECT token FROM device_tokens WHERE user_id = ?`,
+      ).bind(pref.user_id).all<{ token: string }>();
+      const tokens = tokenRows.map((r) => r.token);
+      if (tokens.length === 0) continue;
+
+      const count = all.length;
+      const title = `${count} chore${count === 1 ? "" : "s"} due today`;
+      const body =
+        count === 1 ? all[0]
+        : count <= 3 ? all.join(", ")
+        : `${all.slice(0, 3).join(", ")} +${count - 3} more`;
+
+      ctx.waitUntil(sendToTokens(tokens, { title, body }, env));
+    }
+  },
+};

@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,9 +57,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.chore.tracker.BuildConfig
+import com.chore.tracker.data.DigestPreferences
 import com.chore.tracker.data.DownloadResult
 import com.chore.tracker.data.PatchHouseholdRequest
 import com.chore.tracker.data.PatchRewardSettingsRequest
+import com.chore.tracker.data.PutDigestPreferencesRequest
 import com.chore.tracker.data.Repo
 import com.chore.tracker.data.RewardSettings
 import com.chore.tracker.data.Session
@@ -98,6 +101,25 @@ fun SettingsScreen(
     var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     val rewardSettings = repo?.state?.collectAsState()?.value?.rewardSettings ?: RewardSettings()
     var showPointRatioDialog by remember { mutableStateOf(false) }
+
+    var digestEnabled by remember { mutableStateOf(false) }
+    var digestDays by remember { mutableStateOf(emptySet<Int>()) }
+    var digestHour by remember { mutableStateOf(8) }
+    var digestMinute by remember { mutableStateOf(0) }
+    var digestIncludeOverdue by remember { mutableStateOf(true) }
+    var digestSaving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (repo != null) {
+            runCatching { repo.api.getDigestPreferences() }.onSuccess { prefs ->
+                digestEnabled = prefs.enabled
+                digestDays = prefs.daysOfWeek.toSet()
+                digestHour = prefs.hour
+                digestMinute = prefs.minute
+                digestIncludeOverdue = prefs.includeOverdue
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -379,6 +401,153 @@ fun SettingsScreen(
                     }
                     Text(ratioDisplay, color = MaterialTheme.colorScheme.primary)
                 }
+            }
+
+            // Daily digest notifications.
+            if (repo != null) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Text("Daily digest", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Get a daily notification listing chores assigned to you that are due.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .testTag("digestToggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Enable digest", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = digestEnabled,
+                        onCheckedChange = { digestEnabled = it },
+                    )
+                }
+
+                if (digestEnabled) {
+                    Text(
+                        "Days",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    ) {
+                        listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa").forEachIndexed { idx, label ->
+                            val selected = idx in digestDays
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                        CircleShape,
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline,
+                                        shape = CircleShape,
+                                    )
+                                    .clickable {
+                                        digestDays = if (selected) digestDays - idx else digestDays + idx
+                                    }
+                                    .testTag("digestDay:$idx"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        "Time (device local, 24h)",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = digestHour.toString().padStart(2, '0'),
+                            onValueChange = { v ->
+                                v.toIntOrNull()?.let { h -> if (h in 0..23) digestHour = h }
+                            },
+                            label = { Text("Hour") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(88.dp).testTag("digestHourField"),
+                        )
+                        Text(":", style = MaterialTheme.typography.titleLarge)
+                        OutlinedTextField(
+                            value = digestMinute.toString().padStart(2, '0'),
+                            onValueChange = { v ->
+                                v.toIntOrNull()?.let { m -> if (m in 0..59) digestMinute = m }
+                            },
+                            label = { Text("Min") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(88.dp).testTag("digestMinuteField"),
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .testTag("digestOverdueToggle"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Include overdue tasks", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Also list tasks that missed a previous cycle.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = digestIncludeOverdue,
+                            onCheckedChange = { digestIncludeOverdue = it },
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        digestSaving = true
+                        scope.launch {
+                            runCatching {
+                                repo.api.putDigestPreferences(
+                                    PutDigestPreferencesRequest(
+                                        enabled = digestEnabled,
+                                        daysOfWeek = digestDays.sorted(),
+                                        hour = digestHour,
+                                        minute = digestMinute,
+                                        timezone = java.util.TimeZone.getDefault().id,
+                                        includeOverdue = digestIncludeOverdue,
+                                    )
+                                )
+                            }
+                            digestSaving = false
+                        }
+                    },
+                    enabled = !digestSaving,
+                    modifier = Modifier.fillMaxWidth().testTag("digestSaveButton"),
+                ) { Text(if (digestSaving) "Saving…" else "Save digest settings") }
             }
 
             Spacer(Modifier.height(24.dp))
